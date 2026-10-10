@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  height: 100%;
+  margin: 0;
+  /* Prevent iOS Safari from auto-scaling text during DOM updates (tablet zoom bug) */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Prevent overscroll bounce from triggering browser chrome animation */
+  overscroll-behavior: none;
+}
+
+body {
+  height: 100%;
+  margin: 0;
+  /* CSS-level pinch-zoom prevention — more reliable than user-scalable alone */
+  touch-action: pan-x pan-y;
+  overscroll-behavior: none;
+}
+
+#root {
+  height: 100%;
+}

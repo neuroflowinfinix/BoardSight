@@ -1,0 +1,5 @@
+# Requirements for BoardSight helper scripts (start-servers.py & bump_version.py)
+#
+# NOTE: start-servers.py and bump_version.py rely exclusively on the Python 3 standard library
+# (subprocess, os, sys, time, json, re). No external third-party pip packages are required.
+# Standard Python 3.8+ is all you need.

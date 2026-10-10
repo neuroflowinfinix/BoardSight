@@ -1,0 +1,121 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   YouTube Promo & Signature Wipe Animation Styles
+   Provides wipe-from-left entrance and wipe-to-right exit animations.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Entrance: Wipe in smoothly from the left */
+@keyframes wipeEnterFromLeft {
+  0% {
+    clip-path: inset(0 100% 0 0);
+    opacity: 0;
+    transform: translateX(-24px);
+    filter: blur(3px);
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0px);
+  }
+}
+
+/* Exit: Wipe out smoothly towards the right */
+@keyframes wipeExitToRight {
+  0% {
+    clip-path: inset(0 0 0 0);
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0px);
+  }
+  70% {
+    opacity: 0.85;
+  }
+  100% {
+    clip-path: inset(0 0 0 100%);
+    opacity: 0;
+    transform: translateX(24px);
+    filter: blur(3px);
+  }
+}
+
+/* Shimmer animation for author signature text */
+@keyframes footerTextShimmer {
+  0% {
+    background-position: -200% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+/* Gentle ambient pulse for YouTube badge */
+@keyframes ytBadgePulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+/* Animation Classes */
+.animate-wipe-enter {
+  animation: wipeEnterFromLeft 0.75s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform, clip-path, opacity;
+}
+
+.animate-wipe-exit {
+  animation: wipeExitToRight 0.75s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform, clip-path, opacity;
+}
+
+.animate-text-shimmer {
+  background-size: 200% auto;
+  animation: footerTextShimmer 4s linear infinite;
+}
+
+.animate-yt-pulse {
+  animation: ytBadgePulse 2.5s ease-in-out infinite;
+}
+
+/* Strict image sizing to perfectly fill footer height on both mobile and desktop */
+.yt-channel-avatar {
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  min-height: 28px !important;
+  max-width: 28px !important;
+  max-height: 28px !important;
+  border-radius: 9999px !important;
+  object-fit: cover !important;
+  display: block !important;
+}
+
+@media (min-width: 640px) {
+  .yt-channel-avatar {
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    min-height: 34px !important;
+    max-width: 34px !important;
+    max-height: 34px !important;
+  }
+}
+
+.yt-logo-image {
+  height: 18px !important;
+  max-height: 18px !important;
+  width: auto !important;
+  object-fit: contain !important;
+  display: block !important;
+}
+
+@media (min-width: 640px) {
+  .yt-logo-image {
+    height: 22px !important;
+    max-height: 22px !important;
+  }
+}

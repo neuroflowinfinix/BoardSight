@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+  
+    <link rel="icon" type="image/svg+xml" href="/channel_icon.svg" />
+  
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content" />
+    <title>BoardSight</title>
+    <link rel="preconnect" href="https://lichess1.org" />
+
+    <!-- Preload critical sound effects -->
+    <link rel="preload" href="/sounds/move.mp3" as="audio" type="audio/mpeg" />
+    <link rel="preload" href="/sounds/capture.mp3" as="audio" type="audio/mpeg" />
+    <link rel="preload" href="/sounds/check.mp3" as="audio" type="audio/mpeg" />
+    <link rel="preload" href="/sounds/castle.mp3" as="audio" type="audio/mpeg" />
+  
+    <script>
+      // ── Global Error Suppression for React/Vite Dev Overlays ──
+      window.addEventListener('error', e => {
+        if (e.message === 'ResizeObserver loop limit exceeded' || e.message === 'ResizeObserver loop completed with undelivered notifications.') {
+          e.stopImmediatePropagation();
+        }
+      });
+
+      // ── Theme Initialization ──
+      if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+
+
+    </script>
+  </head>
+  <body class="bg-gray-100 dark:bg-slate-950 text-gray-900 dark:text-slate-100 overflow-x-hidden w-full max-w-[100vw]">
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').then(registration => {
+            console.log('SW registered: ', registration);
+          }).catch(registrationError => {
+            console.log('SW registration failed: ', registrationError);
+          });
+        });
+      }
+    </script>
+  </body>
+</html>
