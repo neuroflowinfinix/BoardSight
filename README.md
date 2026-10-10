@@ -233,7 +233,10 @@ BoardSight/
 │   │   ├── pinTracker.js         # Absolute and relative pin detection
 │   │   ├── sacrificeTracker.js   # Dynamic sacrifice validation
 │   │   └── moveExplainer.js      # Natural coach phrasing generator
-│   └── coachExplainer.js         # Core coach explanation orchestration
+│   ├── accuracy.js               # Weighted CAPS player accuracy calculation
+│   ├── coachExplainer.js         # Core coach explanation orchestration
+│   ├── grammarEngine.js          # Dynamic chess narrative grammar engine
+│   └── moveClassifier.js         # CAPS move classification rules (Brilliant, Great, etc.)
 │
 ├── public/                       # Static public assets
 │   ├── stockfish-v19/            # Stockfish 19 WASM (multi/single) & ASM.js builds
@@ -243,7 +246,9 @@ BoardSight/
 │   ├── pieces/                   # Custom piece SVG vector sets
 │   ├── sounds/                   # Move, capture, check, and castle MP3 audio
 │   ├── frc.tsv                   # Fischer Random Chess (Chess960) positions & FENs
-│   └── openings.json             # Compiled master opening database
+│   ├── openings.json             # Compiled master opening database
+│   ├── sw.js                     # Offline caching & service worker lifecycle
+│   └── _headers                  # Cloudflare security & COOP/COEP isolation headers
 │
 ├── scripts/                      # Build & data generation scripts
 │   ├── buildOpenings.mjs         # Parses TSV databases into indexed openings.json
@@ -266,14 +271,22 @@ BoardSight/
 │   │   └── useGameAnalysis.js    # React analysis lifecycle and worker hook
 │   ├── study/                    # Chess study viewer and interactive lesson tools
 │   ├── utils/
+│   │   ├── accuracy.js           # Client-side accuracy percentage calculations
+│   │   ├── apiClient.js          # API client with seamless local fallback
+│   │   ├── cache.js              # IndexedDB database & opening caching manager
 │   │   ├── engineDetector.js     # Synchronous zero-network browser capability detector
 │   │   ├── gameFetcher.js        # Lichess and Chess.com REST API client
+│   │   ├── metricsCalculator.js  # Client-side ACPL and game metrics calculation
+│   │   ├── moveClassifier.js     # Client-side move classification engine
+│   │   ├── openingsDatabase.js   # Fast IndexedDB openings lookup manager
 │   │   ├── pgnParser.js          # PGN validator and move parser
 │   │   └── shareEncoder.js       # URL compression for sharable game reviews
 │   ├── App.jsx                   # Main application layout and state
 │   ├── main.jsx                  # Application entry point & PWA updater
 │   └── index.css                 # Tailwind directives and custom animation styles
 │
+├── test-run.js                   # CLI test runner for game analysis & classifications
+├── test-explainer.js             # CLI test runner for coach move explanations
 ├── requirements.txt              # Python requirements (Optional — for start-servers.py)
 ├── start-servers.py              # Automated dual-server developer launcher
 ├── vite.config.js                # Vite configuration with proxy, manifest, and COOP/COEP

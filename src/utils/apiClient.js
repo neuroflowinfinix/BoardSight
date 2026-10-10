@@ -5,6 +5,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { encodeGameHash, decodeGameHash } from './shareEncoder.js';
 import { calculateAllMetrics } from './metricsCalculator.js';
+import { classifyMove } from './moveClassifier.js';
 
 const API_BASE = '/api';
 
@@ -66,8 +67,13 @@ export async function loadSharedGame(hashString) {
  * @returns {Promise<Array>} array of classification objects
  */
 export async function fetchClassifications(movesData) {
-  return post('/metrics', { action: 'classifyMoves', payload: { movesData } })
-    .then(r => r.classifications);
+  try {
+    const res = await post('/metrics', { action: 'classifyMoves', payload: { movesData } });
+    return res.classifications;
+  } catch (err) {
+    console.warn('[Metrics] API unreachable, classifying moves locally:', err.message);
+    return movesData.map(data => classifyMove(data));
+  }
 }
 
 /**

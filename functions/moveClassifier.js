@@ -163,7 +163,8 @@ export function classifyMove({
 
   // ── Brilliant (!!) ────────────────────────────────────────────────────────
   // A true sacrifice validated by our sacrifice tracker, provided it did not blunder.
-  if (isSacrifice && winLoss <= 5) return CLASSIFICATIONS.brilliant;
+  // Aligned with sacrificeTracker soundness: winning (postcp >= 150) or sound win drop (winLoss <= 12).
+  if (isSacrifice && (winLoss <= 12 || postcp >= 150) && winLoss <= 20) return CLASSIFICATIONS.brilliant;
 
   // ── Great (!) and Best (★) [100% matched with score.ts] ───────────────────
   if (playedBest && winLoss <= 5) {

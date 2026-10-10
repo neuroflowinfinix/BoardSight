@@ -2,6 +2,8 @@ import fs from 'fs';
 import { spawn } from 'child_process';
 import { Chess } from 'chess.js';
 import { generateMoveExplanation, clearExplainerSession } from './functions/enginex/moveExplainer.js';
+import { classifyMove } from './functions/moveClassifier.js';
+import { detectSacrifice } from './functions/enginex/sacrificeTracker.js';
 
 const pgn = `[Event "Live Chess"]
 [Site "Chess.com"]
@@ -85,59 +87,95 @@ function sendCommand(cmd) {
     stockfish.stdin.write(cmd + '\n');
 }
 
-function getEvaluation(fen) {
+function getEvaluation(fen, depth = 10) {
     return new Promise((resolve) => {
         let bestmove = null;
-        let score = 0;
-        let pvStr = '';
+        let topMoves = [];
         
         const listener = (line) => {
-            if (line.startsWith('info depth ')) {
+            if (line.startsWith('info depth ') && line.includes('multipv ')) {
+                const mpMatch = line.match(/multipv (\d+)/);
                 const scoreMatch = line.match(/score cp (-?\d+)/);
-                if (scoreMatch) score = parseInt(scoreMatch[1]);
                 const mateMatch = line.match(/score mate (-?\d+)/);
-                if (mateMatch) score = parseInt(mateMatch[1]) > 0 ? 9999 : -9999;
-                
                 const pvMatch = line.match(/ pv (.*)$/);
-                if (pvMatch) pvStr = pvMatch[1];
+                
+                if (mpMatch) {
+                    const mp = parseInt(mpMatch[1]);
+                    let score = 0;
+                    if (scoreMatch) score = parseInt(scoreMatch[1]);
+                    else if (mateMatch) score = parseInt(mateMatch[1]) > 0 ? 9999 : -9999;
+                    
+                    const pvStr = pvMatch ? pvMatch[1] : '';
+                    const move = pvStr.split(' ')[0] || '';
+                    
+                    topMoves[mp - 1] = { move, score, pv: pvStr };
+                }
             }
             if (line.startsWith('bestmove')) {
                 const match = line.match(/bestmove (\S+)/);
                 if (match) bestmove = match[1];
                 
                 sfQueue.shift();
-                resolve({ bestmove, score, pvStr });
+                resolve({
+                    bestmove,
+                    score: topMoves[0]?.score ?? 0,
+                    topMoves,
+                    pvStr: topMoves[0]?.pv ?? ''
+                });
             }
         };
         sfQueue.push(listener);
         sendCommand('position fen ' + fen);
-        sendCommand('go depth 6');
+        sendCommand('go depth ' + depth);
     });
 }
 
+const winPct = (cp) => 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cp)) - 1);
+
 async function run() {
-    console.log("Starting engine... Wait for ready");
+    console.log("Starting engine Stockfish 19 Lite WASM... Initializing");
     sendCommand('uci');
-    await new Promise(r => setTimeout(r, 1000)); // wait for uciok
+    await new Promise(r => setTimeout(r, 800));
+    sendCommand('setoption name MultiPV value 2');
+    await new Promise(r => setTimeout(r, 200));
+
+    let openings = { byFen: {} };
+    try {
+        openings = JSON.parse(fs.readFileSync('public/openings.json', 'utf8'));
+    } catch(e) {}
     
     const chess = new Chess();
     chess.loadPgn(pgn);
     const history = chess.history({ verbose: true });
     
     let replayChess = new Chess();
-    let currentEval = await getEvaluation(replayChess.fen());
+    let currentEval = await getEvaluation(replayChess.fen(), 10);
     
     let moveNum = 1;
     let turn = 'w';
+    let inBook = true;
+    const prevTurnScores = { w: null, b: null };
+    const recordedMoves = [];
     
     // Clear moveExplainer's grammar session to ensure no interference
     clearExplainerSession();
     
+    console.log("Analyzing game at depth 10 with MultiPV 2...\n");
+
     for (let i = 0; i < history.length; i++) {
         const move = history[i];
         const preFen = replayChess.fen();
         const preScore = currentEval.score;
         const bestMoveUCI = currentEval.bestmove;
+
+        // Check book status
+        if (inBook) {
+            const norm = preFen.split(' ').slice(0, 4).join(' ');
+            if (!openings.byFen || (!openings.byFen[norm] && !openings.byFen[preFen])) {
+                inBook = false;
+            }
+        }
+        const isBookMove = inBook;
         
         let bestMoveSan = '';
         try {
@@ -146,27 +184,44 @@ async function run() {
                 const m = tempChess.move({ from: bestMoveUCI.slice(0,2), to: bestMoveUCI.slice(2,4), promotion: bestMoveUCI[4] });
                 if (m) bestMoveSan = m.san;
             }
-        } catch(e){}
+        } catch(e) {}
 
         replayChess.move(move);
         const fen = replayChess.fen();
-        const postEval = await getEvaluation(fen);
+        const postEval = await getEvaluation(fen, 10);
+        const postScore = -postEval.score;
         
-        // Loss calculation (since engine output is relative to the side to move)
-        const loss = preScore - (-postEval.score);
-        
-        let clsId = 'good';
-        // Hardcode brilliants for this specific game testing
-        if (move.san === 'Rg5' || move.san === 'Rg5!') clsId = 'brilliant';
-        else if (move.san === 'Qh6' || move.san === 'Qh6!') clsId = 'brilliant';
-        else if (loss > 300) clsId = 'blunder';
-        else if (loss > 150) clsId = 'mistake';
-        else if (loss > 50) clsId = 'inaccuracy';
-        else if (bestMoveUCI === move.from + move.to) clsId = 'best';
-        else if (loss < 10) clsId = 'excellent';
-        
-        const classification = { id: clsId };
-        const engineTopMoves = [{ move: bestMoveUCI, pv: currentEval.pvStr, score: currentEval.score }];
+        // MultiPV soundness check (Great move detection)
+        const s1 = preScore;
+        const s2 = currentEval.topMoves?.[1]?.score ?? null;
+        const spp = prevTurnScores[turn] ?? 0;
+
+        let isOnlySoundMove = false;
+        if (s2 !== null) {
+            const pvWinDiff = winPct(s1) - winPct(s2);
+            const turnWinDiff = winPct(s1) - winPct(spp);
+            const moveLoss = winPct(s1) - winPct(postScore);
+            if (pvWinDiff > 10 && turnWinDiff > 5 && moveLoss <= 5) {
+                isOnlySoundMove = true;
+            }
+        }
+
+        const prevMove = i > 0 ? history[i - 1] : null;
+        const sacResult = detectSacrifice(fen, move, postEval, preScore, postScore, prevMove);
+        const isSacrifice = sacResult ? sacResult.type !== 'unsound_sacrifice' : false;
+
+        const classification = classifyMove({
+            preScore,
+            postScore,
+            engineBestMove: bestMoveUCI,
+            playerMoveUCI: move.from + move.to + (move.promotion || ''),
+            isBookMove,
+            isSacrifice,
+            isOnlySoundMove
+        });
+
+        const winLoss = winPct(preScore) - winPct(postScore);
+        const cpLoss = Math.max(0, preScore - postScore);
 
         const params = {
             move: move,
@@ -174,12 +229,12 @@ async function run() {
             fen,
             classification,
             preScore,
-            postScore: -postEval.score,
-            whiteScore: turn === 'w' ? -postEval.score : postEval.score,
+            postScore,
+            whiteScore: turn === 'w' ? postScore : -postScore,
             bestMoveSan,
-            engineTopMoves,
+            engineTopMoves: currentEval.topMoves,
             pvStr: postEval.pvStr,
-            isBookMove: i < 8,
+            isBookMove,
             moveNumber: moveNum,
             perspectiveColor: turn,
             history: history.slice(0, i)
@@ -188,17 +243,62 @@ async function run() {
         const expl = generateMoveExplanation(params);
         
         const movePrefix = turn === 'w' ? moveNum + '. ' + move.san : moveNum + '... ' + move.san;
-        console.log('[' + movePrefix + '] (' + clsId + ') [Loss: ' + loss + ']');
-        console.log('  => ' + expl.text);
-        console.log('  [Board Context] ' + (expl.tacticType || 'positional'));
+        console.log(`[${movePrefix}] (${classification.id}) [WinLoss: ${winLoss.toFixed(1)}%, cpLoss: ${cpLoss}]`);
+        console.log(`  => ${expl.text}`);
+        console.log(`  [Context] ${expl.tacticType || 'positional'}`);
         console.log('');
         
+        recordedMoves.push({
+            ply: i + 1,
+            moveNum,
+            turn,
+            san: move.san,
+            cls: classification.id,
+            winLoss: winLoss.toFixed(1),
+            preScore,
+            postScore
+        });
+
+        prevTurnScores[turn] = preScore;
         currentEval = postEval;
         turn = turn === 'w' ? 'b' : 'w';
         if (turn === 'w') moveNum++;
     }
     
     stockfish.kill();
+
+    console.log('================================================================');
+    console.log('                      TARGET MOVES VERIFICATION                 ');
+    console.log('================================================================');
+
+    const targets = [
+        { label: 'White 17. Rg5', moveNum: 17, turn: 'w', expected: 'brilliant' },
+        { label: 'White 18. Qh6', moveNum: 18, turn: 'w', expected: 'brilliant' },
+        { label: 'Black 5... c6', moveNum: 5, turn: 'b', expected: 'mistake' },
+        { label: 'White 23. Rf5', moveNum: 23, turn: 'w', expected: 'mistake' },
+        { label: 'White 25. O-O-O', moveNum: 25, turn: 'w', expected: 'mistake' },
+        { label: 'White 29. Rc1', moveNum: 29, turn: 'w', expected: 'mistake' },
+        { label: 'Black 10... f6', moveNum: 10, turn: 'b', expected: 'blunder' },
+        { label: 'Black 29... cxd4', moveNum: 29, turn: 'b', expected: 'blunder' },
+        { label: 'Black 24... Ne6', moveNum: 24, turn: 'b', expected: 'great' },
+        { label: 'Black 25... Ng7', moveNum: 25, turn: 'b', expected: 'great' },
+        { label: 'White 12. Qh3', moveNum: 12, turn: 'w', expected: 'great' },
+    ];
+
+    let matchCount = 0;
+    for (const t of targets) {
+        const found = recordedMoves.find(m => m.moveNum === t.moveNum && m.turn === t.turn);
+        const actual = found ? found.cls : 'not_found';
+        const match = actual === t.expected;
+        if (match) matchCount++;
+        const status = match ? 'MATCH  OK' : 'DIFF     ';
+        console.log(`[${status}] ${t.label.padEnd(20)} Expected: ${t.expected.padEnd(10)} Actual: ${actual.padEnd(10)} (WinLoss: ${found?.winLoss}%)`);
+    }
+
+    console.log('----------------------------------------------------------------');
+    console.log(`TOTAL TARGET MATCHES: ${matchCount} / ${targets.length}`);
+    console.log('================================================================\n');
+
     process.exit(0);
 }
 

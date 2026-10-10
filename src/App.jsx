@@ -1390,6 +1390,7 @@ export default function App() {
 
   // ── Server-fetched Game Metrics ───────────────────────────────────────────
   const [serverMetrics, setServerMetrics] = useState(null);
+  const lastMetricsPayloadKeyRef = useRef('');
 
   useEffect(() => {
     if (!isAnalyzing && analyzedMoves.length > 0) {
@@ -1404,18 +1405,25 @@ export default function App() {
         });
         return;
       }
+      const wElo = parseInt(gameInfo?.whiteElo, 10) || 0;
+      const bElo = parseInt(gameInfo?.blackElo, 10) || 0;
+      
+      // Deduplicate: only fetch if metrics-relevant fields changed (prevents refetching when coachExplanation is added)
+      const payloadKey = `${analyzedMoves.length}-${wElo}-${bElo}-` + analyzedMoves.map(m => `${m.loss}-${m.classification?.id}`).join('|');
+      if (lastMetricsPayloadKeyRef.current === payloadKey) return;
+      lastMetricsPayloadKeyRef.current = payloadKey;
+
       // Create a lightweight payload since we only need certain fields for metrics
       const payload = analyzedMoves.map(m => ({
         color: m.color, isBookMove: m.isBookMove, phase: m.phase, loss: m.loss,
         preScore: m.preScore, postScore: m.postScore, classification: m.classification,
         playerMoveUCI: m.playerMoveUCI, engineBestMove: m.engineBestMove
       }));
-      const wElo = parseInt(gameInfo?.whiteElo, 10) || 0;
-      const bElo = parseInt(gameInfo?.blackElo, 10) || 0;
       fetchGameMetrics(payload, wElo, bElo)
         .then(data => setServerMetrics(data))
         .catch(err => console.error('[Metrics] Failed to fetch:', err));
     } else if (analyzedMoves.length === 0) {
+      lastMetricsPayloadKeyRef.current = '';
       setServerMetrics(null);
     }
   }, [isAnalyzing, analyzedMoves, sharedMetrics, gameInfo]);
