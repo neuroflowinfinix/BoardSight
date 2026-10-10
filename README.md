@@ -11,6 +11,16 @@
 **A modern, production-grade, in-browser chess game analysis platform.**  
 Featuring high-performance client-side WebAssembly engines, deep tactical move classification, natural coach explanations, opening detection, and interactive game graphs — completely free and privacy-first.
 
+<img width="1680" height="915" alt="chrome_TdwvqagsYE" src="https://github.com/user-attachments/assets/aa5f6e02-b3d5-474a-8658-c0c1fc951869" />
+
+## Close to chess.com analysis!
+
+<img width="675" height="596" alt="chrome_YG1W4xnibf" src="https://github.com/user-attachments/assets/e61884a2-9a33-475e-a1f0-f71c0c00afd2" />
+
+<img width="285" height="910" alt="ronZa768jF" src="https://github.com/user-attachments/assets/13376768-23b5-412c-a79e-7f5233df0897" />
+
+
+
 [Features](#-key-features) • [Tech Stack](#-tech-stack) • [Getting Started](#-getting-started) • [Development Workflow](#-development-workflow) • [Project Architecture](#-project-architecture) • [Deployment](#-deployment)
 
 </div>
