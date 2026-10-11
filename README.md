@@ -335,3 +335,9 @@ This project is tailored for instant deployment on **Cloudflare Pages**:
 Copyright © 2026 **neuroflow_infinix**. All rights reserved.  
 Stockfish is licensed under the [GNU General Public License v3 (GPL-3.0)](https://www.gnu.org/licenses/gpl-3.0.html).  
 Berserk is licensed under the [GNU General Public License v3 (GPL-3.0)](https://www.gnu.org/licenses/gpl-3.0.html).
+
+## Permissions
+
+This project is source-available under a proprietary license. Copying,modifying, or using any part or fragment of this code for personal, academic, or commercial projects is strictly prohibited without explicit written consent.
+
+For permission requests or licensing inquiries, contact: **[neuroflow_infinix@outlook.in](mailto:neuroflow_infinix@outlook.in)**.
