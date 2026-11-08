@@ -11,7 +11,8 @@ const ENGINE_LABELS = {
 
 export default function PGNInput({
   onAnalyze, disabled, engineReady, engineError, onRetryEngine, onOpenSettings, pgnError, isChess960, onToggle960, onOpenImport, engineName = 'stockfish',
-  dbReady = false, engineLoadingStatus = null, onLoadCge, onOpenStudy, showStudyModal: showStudyModalProp, setShowStudyModal: setShowStudyModalProp
+  dbReady = false, engineLoadingStatus = null, onLoadCge, onOpenStudy, showStudyModal: showStudyModalProp, setShowStudyModal: setShowStudyModalProp,
+  onOpenPlayBotvinnik
 }) {
   const [pgn, setPgn] = useState('');
   const [isDragging, setIsDragging] = useState(false);
@@ -19,6 +20,15 @@ export default function PGNInput({
   const [studyUrl, setStudyUrl] = useState('');
 
   const isStudyModalOpen = showStudyModalProp !== undefined ? showStudyModalProp : showStudyModalLocal;
+
+  const handleOpenBotvinnik = () => {
+    if (onOpenPlayBotvinnik) {
+      onOpenPlayBotvinnik();
+    } else {
+      window.history.pushState({ modal: '/play/botvinnik' }, '', '/play/botvinnik');
+      window.dispatchEvent(new Event('popstate'));
+    }
+  };
 
   const handleOpenLearnModal = () => {
     if (setShowStudyModalProp) {
@@ -223,6 +233,38 @@ export default function PGNInput({
           <span>Start <span className="font-black tracking-wide">Chess960</span> Review</span>
         ) : 'Start Review')}
       </button>
+
+      {/* Play v/s GM Botvinnik Banner Card */}
+      <div
+        onClick={handleOpenBotvinnik}
+        className="mt-2.5 shrink-0 w-full border border-amber-300/80 dark:border-amber-700/60 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 dark:from-slate-800 dark:via-amber-950/20 dark:to-slate-800 hover:border-amber-400 dark:hover:border-amber-500 rounded-xl p-2.5 sm:p-3 transition-all cursor-pointer shadow-xs flex items-center justify-between group active:scale-[0.99]"
+      >
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/50 border border-amber-300 dark:border-amber-700/60 flex items-center justify-center text-xl shadow-xs group-hover:scale-110 transition-transform shrink-0">
+            👴
+          </div>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs sm:text-sm font-black text-gray-900 dark:text-slate-100 leading-tight">
+                Play v/s GM Botvinnik
+              </span>
+              <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500 text-white shadow-xs">
+                NEW
+              </span>
+            </div>
+            <span className="text-[10px] sm:text-[11px] font-medium text-gray-500 dark:text-slate-400 mt-0.5 line-clamp-1">
+              Trained on 919 GM games · Stockfish Depth 7 Live Analysis
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1 text-xs font-bold text-amber-700 dark:text-amber-400 group-hover:translate-x-1 transition-transform shrink-0 ml-2">
+          <span>Play</span>
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </div>
 
       <div className="mt-3 flex-1 flex flex-col shrink-0 lg:shrink">
         <GameImport onAnalyze={onAnalyze} />

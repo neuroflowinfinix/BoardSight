@@ -41,6 +41,7 @@ import CustomExplanationWarningModal from './components/CustomExplanationWarning
 import VersionInfoModal from './components/VersionInfoModal';
 import SpecialThanksToast from './components/SpecialThanksToast';
 import YouTubeBanner from './components/YT/YouTubeBanner';
+import PlayBotvinnik from './components/PlayBotvinnik';
 
 // ── Theme Initialization (Prevents dark mode flashing on initial load) ──
 if (typeof window !== 'undefined') {
@@ -382,6 +383,18 @@ export default function App() {
 
   const [learnModalOpen, setLearnModalOpen] = useState(_initPath === '/learn');
 
+  // ── Play vs GM Botvinnik Mode State ────────────────────────
+  const [playBotvinnikMode, setPlayBotvinnikMode] = useState(() => {
+    return _initPath === '/play/botvinnik' || _initPath === '/botvinnik' || _initPath === '/play' || _initPath === '/play-botvinnik';
+  });
+
+  const handleOpenPlayBotvinnik = useCallback(() => {
+    setPlayBotvinnikMode(true);
+    if (window.location.pathname.toLowerCase() !== '/play/botvinnik') {
+      window.history.pushState({ modal: '/play/botvinnik' }, '', '/play/botvinnik');
+    }
+  }, []);
+
   // ── Lichess Study Mode State ───────────────────────────────
   const [studyMode, setStudyMode] = useState(() => {
     return typeof window !== 'undefined' && window.location.pathname.toLowerCase().startsWith('/learn');
@@ -436,8 +449,8 @@ export default function App() {
     if (activeRoute && currentPath !== activeRoute.path) {
       window.history.pushState({ modal: activeRoute.path }, '', activeRoute.path + '/');
     } else if (!activeRoute && Object.keys(MODAL_ROUTE_MAP).includes(currentPath)) {
-      // Don't push to root if we're in a /learn route (study mode)
-      if (!currentPath.startsWith('/learn/')) {
+      // Don't push to root if we're in a /learn route (study mode) or /play route (play vs botvinnik)
+      if (!currentPath.startsWith('/learn/') && !currentPath.startsWith('/play') && currentPath !== '/botvinnik') {
         // A routable modal was just closed — go back to root
         window.history.pushState({}, '', '/');
       }
@@ -448,6 +461,8 @@ export default function App() {
   useEffect(() => {
     const onPopState = () => {
       const path = window.location.pathname.replace(/\/+$/, '').toLowerCase();
+      const isPlayRoute = path === '/play/botvinnik' || path === '/botvinnik' || path === '/play' || path === '/play-botvinnik';
+      setPlayBotvinnikMode(isPlayRoute);
       // Close all routable modals, then open the one matching the URL (if any)
       Object.values(MODAL_ROUTE_MAP).forEach(r => r.set(false));
       if (MODAL_ROUTE_MAP[path]) {
@@ -757,6 +772,7 @@ export default function App() {
   };
 
   const resetToCleanSlate = useCallback(() => {
+    setPlayBotvinnikMode(false);
     setStudyMode(false);
     setStudyData(null);
     setStudyError(null);
@@ -777,10 +793,15 @@ export default function App() {
     resetToCleanSlate();
   }, [resetToCleanSlate]);
 
-  // Handle /learn URL routing
+  // Handle /learn and /play URL routing
   useEffect(() => {
     const handleRouteCheck = () => {
       const path = window.location.pathname.replace(/\/+$/, '');
+      const lower = path.toLowerCase();
+      if (lower === '/play/botvinnik' || lower === '/botvinnik' || lower === '/play' || lower === '/play-botvinnik') {
+        setPlayBotvinnikMode(true);
+        return;
+      }
       const match = path.match(/^\/learn\/([^\/]+)(?:\/([^\/]+))?/i);
       
       if (match) {
@@ -2279,6 +2300,28 @@ export default function App() {
     </div>
   ) : null;
 
+  if (playBotvinnikMode) {
+    return (
+      <PlayBotvinnik
+        initialSettings={settings}
+        initialPieceSet={pieceSet}
+        onExit={() => {
+          setPlayBotvinnikMode(false);
+          if (window.location.pathname !== '/') {
+            window.history.pushState({}, '', '/');
+          }
+        }}
+        onAnalyzeGame={(pgn) => {
+          setPlayBotvinnikMode(false);
+          if (window.location.pathname !== '/') {
+            window.history.pushState({}, '', '/');
+          }
+          handleAnalyze(pgn);
+        }}
+      />
+    );
+  }
+
   return (
     <>
       <SettingsModal
@@ -2356,13 +2399,23 @@ export default function App() {
               <div className="flex items-center gap-2 min-w-0 w-full sm:w-auto">
                 <span className="font-black text-gray-800 dark:text-slate-300 text-lg sm:text-xl tracking-tight shrink-0">BoardSight</span>
                 <span className="text-xs sm:text-sm font-bold text-[#4a7c59] dark:text-[#65a377] bg-[#4a7c59]/10 dark:bg-[#4a7c59]/20 border border-[#4a7c59]/20 dark:border-[#4a7c59]/30 px-2.5 py-1 rounded-md shadow-sm whitespace-nowrap truncate ml-auto sm:ml-4">
-                  Updated 03/10/2026
+                  Updated 08/11/2026
                 </span>
               </div>
             </div>
 
             {/* Buttons Area */}
             <div className="flex items-center justify-between gap-1 sm:gap-2 w-full sm:w-auto pb-1 sm:pb-0">
+
+              <button
+                onClick={handleOpenPlayBotvinnik}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-1 sm:gap-1.5 text-[11px] sm:text-sm font-bold text-white bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 px-1 sm:px-3 py-1.5 rounded-lg transition-all shadow-sm border border-amber-600/40 min-w-0"
+                title="Play vs GM Mikhail Botvinnik engine"
+              >
+                <span className="shrink-0 text-amber-200">🏛️</span>
+                <span className="truncate sm:hidden">Botvinnik</span>
+                <span className="truncate hidden sm:inline">Play vs Botvinnik</span>
+              </button>
 
               <a
                 href="https://discord.gg/EDZMXXDvJN"
@@ -2565,6 +2618,7 @@ export default function App() {
                     onOpenStudy={loadStudyById}
                     showStudyModal={learnModalOpen}
                     setShowStudyModal={setLearnModalOpen}
+                    onOpenPlayBotvinnik={handleOpenPlayBotvinnik}
                   />
                 </div>
               )}

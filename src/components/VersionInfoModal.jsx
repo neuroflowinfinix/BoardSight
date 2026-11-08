@@ -33,7 +33,7 @@ export default function VersionInfoModal({ isOpen, onClose }) {
                                 Current Version
                             </h3>
                             <p className="text-xl text-sky-600 dark:text-sky-400 font-black">
-                                Version 23.3.1
+                                Version 23.4.1
                             </p>
                         </div>
                     </div>

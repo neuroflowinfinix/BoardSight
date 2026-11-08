@@ -4,6 +4,7 @@ export default function FAQModal({ isOpen, onClose }) {
     if (!isOpen) return null;
 
     const faqs = [
+        { q: "What is Play v/s GM Botvinnik?", a: "Play v/s GM Botvinnik lets you play an interactive match against an engine trained on the games and master repertoire of 6th World Champion Mikhail Botvinnik. Each move is evaluated in real time at Stockfish Depth 7 with accuracy classifications and win probability calculations. When finished, you can send the game into BoardSight for full in-depth review with one click." },
         { q: "How do I switch engines ?", a: "Engines can be selected between Berserk v4.3.0 and Stockfish 18 through the settings button." },
         { q: "How to see accuracy and game rating?", a: "For PC screens, the game summary UI has been moved to the Game Report button for better user experience, which appears after a game analysis is complete." },
         { q: "How to report an issue with the website I found?", a: "We recommend reporting issues and bugs on our Discord, while you may also report directly on our e-mail provided in community and contact." },

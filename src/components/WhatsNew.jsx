@@ -18,6 +18,7 @@ export default function WhatsNew({ onClose }) {
 
                     <div className="space-y-4 flex-1">
                         {[
+                            { title: "Play v/s GM Botvinnik", icon: "🏛️", new: true, desc: "Challenge an engine trained on the games and master repertoire of 6th World Champion Mikhail Botvinnik! Choose your side (White, Black, or Random) and enjoy live Stockfish Depth 7 real-time evaluations, move classifications, win chance calculation, and 1-click review in BoardSight." },
                             { title: "New Stockfish 19", new: true, desc: "The new Stockfish 19 release has been applied for analysis purposes, while also keeping Stockfish 18." },
                             { title: "Interactive Lichess Study Mode", icon: "📖", new: true, desc: "Paste any Lichess study link to load and study interactive chapters! Features chapter list scrolling, automatic chapter transition on completion, chapter intro notes, and opening database integration." },
                             { title: "Animated Coach Reactions", icon: "🎭", new: true, desc: "The coach now features dynamic, fully animated reactions that respond to your best moves and blunders!" },
