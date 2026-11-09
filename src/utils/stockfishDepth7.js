@@ -1,12 +1,17 @@
 /**
  * stockfishDepth7.js
  *
- * Ultra-fast Stockfish depth 7 real-time analyzer for live play vs engine.
- * Computes centipawns / mate evaluation, best move, and move classifications
- * in ~20-50ms per move without lagging the UI.
+ * Real-time Stockfish 19 depth 7 analyzer for live play vs GM Botvinnik.
+ * Uses Stockfish 19 (/stockfish-v19/stockfish-19-lite-single.js) Web Worker.
+ *
+ * Strictly adheres to BoardSight's original evaluation and annotation system
+ * (src/utils/moveClassifier.js):
+ *   - Uses cpToWinPct() for win-rate calculations
+ *   - Uses classifyMove() for move classifications (Blunder ??, Mistake ?, Inaccuracy ?!, Good, Excellent ✓, Best ⊕, Great !, Brilliant !!)
+ *   - Accurately tracks preScore and postScore from the moving player's perspective
  */
 
-import { cpToWinPct } from './moveClassifier';
+import { classifyMove, CLASSIFICATIONS, cpToWinPct } from './moveClassifier';
 import { getEngineConfig } from './engineDetector';
 
 export class StockfishDepth7Analyzer {
@@ -16,15 +21,21 @@ export class StockfishDepth7Analyzer {
     this.onReady = onReady;
     this.pendingResolve = null;
     this.lastInfo = null;
+    this.searchTimeout = null;
     this._init();
   }
 
   _init() {
     try {
       const { workerPaths } = getEngineConfig('stockfish-19');
-      const candidatePaths = workerPaths && workerPaths.length > 0 
-        ? workerPaths 
-        : ['/stockfish-v19/stockfish-19-lite-single.js', '/stockfish-v18/stockfish-18-lite-single.js'];
+      const candidatePaths =
+        workerPaths && workerPaths.length > 0
+          ? workerPaths
+          : [
+              '/stockfish-v19/stockfish-19-lite-single.js',
+              '/stockfish-v19/stockfish-19-lite.js',
+              '/stockfish-v18/stockfish-18-lite-single.js',
+            ];
 
       this._tryInitWorker(candidatePaths, 0);
     } catch (err) {
@@ -53,65 +64,100 @@ export class StockfishDepth7Analyzer {
       this.worker.onerror = (err) => {
         console.warn(`[StockfishDepth7] Worker failed at ${path}:`, err);
         if (this.worker) {
-          try { this.worker.terminate(); } catch (e) {}
+          try {
+            this.worker.terminate();
+          } catch (e) {}
           this.worker = null;
         }
         this._tryInitWorker(paths, index + 1);
       };
 
       this.worker.onmessage = (e) => {
-        const line = typeof e === 'string' ? e : (typeof e.data === 'string' ? e.data : (e.data?.data || ''));
+        const line =
+          typeof e === 'string'
+            ? e
+            : typeof e.data === 'string'
+            ? e.data
+            : e.data?.data || '';
         if (!line) return;
         this._handleLine(line.trim());
       };
 
+      // Standard UCI initialization
       this.worker.postMessage('uci');
-      this.worker.postMessage('setoption name Threads value 1');
-      this.worker.postMessage('setoption name Hash value 16');
-      this.worker.postMessage('isready');
     } catch (err) {
-      console.warn(`[StockfishDepth7] Direct worker creation failed for ${path}:`, err);
+      console.warn(`[StockfishDepth7] Worker creation failed for ${path}:`, err);
       this._tryInitWorker(paths, index + 1);
     }
   }
 
   _handleLine(line) {
+    if (line === 'uciok') {
+      if (this.worker) {
+        this.worker.postMessage('setoption name Threads value 1');
+        this.worker.postMessage('setoption name Hash value 16');
+        this.worker.postMessage('setoption name MultiPV value 2');
+        this.worker.postMessage('isready');
+      }
+      return;
+    }
+
     if (line === 'readyok') {
       this.isReady = true;
       if (this.onReady) this.onReady(true);
       return;
     }
 
-    // Parse info line:
-    // e.g. "info depth 7 seldepth 9 multipv 1 score cp 23 nodes 2966 ... pv b1c3 b8c6"
-    // e.g. "info depth 7 ... score mate -3 ..."
+    // Capture depth 7 search info line (score cp / mate, pv, best move)
     if (line.startsWith('info ') && line.includes('score ')) {
       const depthMatch = line.match(/\bdepth\s+(\d+)/);
       const cpMatch = line.match(/\bscore\s+cp\s+(-?\d+)/);
       const mateMatch = line.match(/\bscore\s+mate\s+(-?\d+)/);
       const pvMatch = line.match(/\bpv\s+([a-h1-8qrbn\s]+)/);
+      const mpvMatch = line.match(/\bmultipv\s+(\d+)/);
 
       const depth = depthMatch ? parseInt(depthMatch[1], 10) : 0;
       let scoreCp = cpMatch ? parseInt(cpMatch[1], 10) : null;
       let mateIn = mateMatch ? parseInt(mateMatch[1], 10) : null;
       const pv = pvMatch ? pvMatch[1].trim().split(/\s+/) : [];
+      const mpv = mpvMatch ? parseInt(mpvMatch[1], 10) : 1;
 
-      this.lastInfo = {
-        depth,
-        scoreCp,
-        mateIn,
-        pv,
-        bestMoveUci: pv[0] || null,
-        raw: line,
-      };
+      if (scoreCp !== null || mateIn !== null) {
+        const computedCp =
+          scoreCp !== null
+            ? scoreCp
+            : mateIn > 0
+            ? 10000 - mateIn
+            : -10000 - mateIn;
+
+        const entry = {
+          depth,
+          scoreCp: computedCp,
+          mateIn,
+          pv,
+          bestMoveUci: pv[0] || null,
+          raw: line,
+        };
+
+        if (!this.multiPvMap) this.multiPvMap = {};
+        this.multiPvMap[mpv] = entry;
+
+        if (mpv === 1) {
+          this.lastInfo = entry;
+        }
+      }
     }
 
-    // Parse bestmove line:
-    // e.g. "bestmove b1c3 ponder b8c6"
+    // Search completed: bestmove <uci> ponder <uci>
     if (line.startsWith('bestmove ')) {
       const parts = line.split(/\s+/);
       const bestMoveUci = parts[1];
       const ponder = parts[3] || null;
+
+      if (this.searchTimeout) {
+        clearTimeout(this.searchTimeout);
+        this.searchTimeout = null;
+      }
 
       if (this.pendingResolve) {
         const resolve = this.pendingResolve;
@@ -120,12 +166,27 @@ export class StockfishDepth7Analyzer {
         const info = this.lastInfo || {};
         this.lastInfo = null;
 
+        const mpvList = [];
+        if (this.multiPvMap) {
+          if (this.multiPvMap[1]) mpvList.push(this.multiPvMap[1]);
+          if (this.multiPvMap[2]) mpvList.push(this.multiPvMap[2]);
+        }
+        this.multiPvMap = {};
+
+        const scoreCp = info.scoreCp ?? 0;
+        const mateIn = info.mateIn ?? null;
+        const finalBest =
+          bestMoveUci && bestMoveUci !== '(none)'
+            ? bestMoveUci
+            : info.bestMoveUci || null;
+
         resolve({
           depth: info.depth || 7,
-          scoreCp: info.scoreCp ?? 0,
-          mateIn: info.mateIn ?? null,
-          pv: info.pv || (bestMoveUci ? [bestMoveUci] : []),
-          bestMoveUci: bestMoveUci || info.bestMoveUci,
+          scoreCp,
+          mateIn,
+          pv: info.pv || (finalBest ? [finalBest] : []),
+          bestMoveUci: finalBest,
+          topMoves: mpvList,
           ponder,
         });
       }
@@ -133,27 +194,55 @@ export class StockfishDepth7Analyzer {
   }
 
   /**
-   * Run depth 7 analysis on the position formed by movesArray.
-   * @param {string[]} movesArray - list of UCI moves
-   * @param {string} turn - 'w' or 'b' side to move in current position
+   * Run depth 7 analysis on a board position using Stockfish 19.
+   * @param {object} params
+   * @param {string} [params.fen] - Full FEN string of the position to evaluate
+   * @param {string[]} [params.uciMoves] - UCI move history
+   * @param {string} [params.turn='w'] - 'w' or 'b' side whose turn it is to move
    * @returns {Promise<{ depth, scoreCp, mateIn, whiteRelativeScore, evalStr, bestMoveUci, pv }>}
    */
-  analyze(movesArray = [], turn = 'w') {
+  analyze({ fen, uciMoves = [], turn = 'w' }) {
     return new Promise((resolve) => {
+      // Clear any pending resolve
+      if (this.pendingResolve) {
+        const prev = this.pendingResolve;
+        this.pendingResolve = null;
+        if (this.searchTimeout) clearTimeout(this.searchTimeout);
+        prev({
+          depth: 7,
+          scoreCp: 0,
+          mateIn: null,
+          pv: [],
+          bestMoveUci: null,
+          sideRelativeScore: 0,
+          whiteRelativeScore: 0,
+          evalStr: '0.00',
+        });
+      }
+
       this.pendingResolve = (rawResult) => {
-        // Stockfish reports score from the moving side's perspective
-        // Convert to White-relative score
         const sideScore = rawResult.scoreCp ?? 0;
+        // In UCI: Stockfish reports score from the POV of the side whose turn it is
+        // Convert to White-relative score (+ = White better, - = Black better)
         let whiteRelativeScore = turn === 'w' ? sideScore : -sideScore;
         let evalStr = '0.00';
 
         if (rawResult.mateIn !== null) {
           const whiteMate = turn === 'w' ? rawResult.mateIn : -rawResult.mateIn;
-          evalStr = whiteMate > 0 ? `+M${Math.abs(whiteMate)}` : `-M${Math.abs(whiteMate)}`;
-          whiteRelativeScore = whiteMate > 0 ? 10000 - whiteMate : -10000 - whiteMate;
+          evalStr =
+            whiteMate > 0
+              ? `+M${Math.abs(whiteMate)}`
+              : `-M${Math.abs(whiteMate)}`;
+          whiteRelativeScore =
+            whiteMate > 0 ? 10000 - whiteMate : -10000 - whiteMate;
         } else {
-          const val = (whiteRelativeScore / 100).toFixed(2);
-          evalStr = whiteRelativeScore > 0 ? `+${val}` : `${val}`;
+          const absVal = (Math.abs(whiteRelativeScore) / 100).toFixed(2);
+          evalStr =
+            whiteRelativeScore > 0
+              ? `+${absVal}`
+              : whiteRelativeScore < 0
+              ? `-${absVal}`
+              : '0.00';
         }
 
         resolve({
@@ -167,20 +256,45 @@ export class StockfishDepth7Analyzer {
       this.lastInfo = null;
 
       if (!this.worker) {
-        resolve({
+        const fallback = this.pendingResolve;
+        this.pendingResolve = null;
+        fallback({
           depth: 7,
           scoreCp: 0,
           mateIn: null,
-          whiteRelativeScore: 0,
-          evalStr: '0.00',
-          bestMoveUci: null,
           pv: [],
+          bestMoveUci: null,
         });
         return;
       }
 
-      if (movesArray.length > 0) {
-        this.worker.postMessage(`position startpos moves ${movesArray.join(' ')}`);
+      // Safety watchdog: resolve after 3500ms if engine takes unusually long
+      this.searchTimeout = setTimeout(() => {
+        if (this.pendingResolve) {
+          const fallback = this.pendingResolve;
+          this.pendingResolve = null;
+          const mpvList = [];
+          if (this.multiPvMap) {
+            if (this.multiPvMap[1]) mpvList.push(this.multiPvMap[1]);
+            if (this.multiPvMap[2]) mpvList.push(this.multiPvMap[2]);
+          }
+          this.multiPvMap = {};
+          fallback({
+            depth: 7,
+            scoreCp: this.lastInfo?.scoreCp ?? 0,
+            mateIn: this.lastInfo?.mateIn ?? null,
+            pv: this.lastInfo?.pv ?? [],
+            bestMoveUci: this.lastInfo?.bestMoveUci ?? null,
+            topMoves: mpvList,
+          });
+        }
+      }, 3500);
+
+      // Send UCI commands to Stockfish 19
+      if (fen) {
+        this.worker.postMessage(`position fen ${fen}`);
+      } else if (uciMoves.length > 0) {
+        this.worker.postMessage(`position startpos moves ${uciMoves.join(' ')}`);
       } else {
         this.worker.postMessage('position startpos');
       }
@@ -190,115 +304,101 @@ export class StockfishDepth7Analyzer {
   }
 
   /**
-   * Classify a move based on win probability loss and depth 7 analysis.
+   * Strictly classify a move using BoardSight's original moveClassifier logic.
+   *
+   * @param {object} p
+   * @param {number} p.preScore - Eval of the position before the move (moving player POV in cp)
+   * @param {number} p.postScore - Eval of the position after the move (moving player POV in cp)
+   * @param {string} [p.engineBestMove] - UCI move recommended by Stockfish 19 before this move
+   * @param {string} [p.playerMoveUCI] - UCI of the move played
+   * @param {boolean} [p.isBookMove=false] - Whether move is in the opening book
+   * @param {string} [p.san] - Standard algebraic notation of move played
+   * @param {boolean} [p.isBotvinnik=false] - Whether this move was played by GM Botvinnik
+   * @param {number} [p.bookGames] - Number of games in Botvinnik's book repertoire
+   * @param {string} [p.evalStr] - Evaluation string after the move (e.g. "+0.35", "-M1")
+   * @param {string} [p.bestMoveSan] - SAN of the recommended engine move
+   * @returns {object} Full classification object with id, label, symbol, color, bg, commentary, winDrop
    */
-  classifyMove({
-    preScoreMovingPov,
-    postScoreMovingPov,
-    isBookMove,
-    isEngineBest,
-    san,
-    isBotvinnik,
-    bookGames,
-    evalStr,
-    bestMoveSan,
+  classify({
+    preScore,
+    postScore,
+    engineBestMove,
+    playerMoveUCI,
+    isBookMove = false,
+    san = '',
+    isBotvinnik = false,
+    bookGames = null,
+    evalStr = '0.00',
+    bestMoveSan = null,
   }) {
-    if (isBookMove) {
-      return {
-        id: 'book',
-        label: 'Book Move',
-        symbol: '',
-        commentary: isBotvinnik
-          ? (bookGames
-              ? `GM Botvinnik plays ${san} from his opening repertoire (recorded in ${bookGames} historical games).`
-              : `GM Botvinnik follows established master theory with ${san}.`)
-          : `Theoretical opening move (${san}). Maintaining solid theoretical balance.`,
-      };
-    }
+    // 1. Run BoardSight's official classification algorithm
+    const baseClassification = classifyMove({
+      preScore,
+      postScore,
+      engineBestMove,
+      playerMoveUCI,
+      isBookMove,
+      isNovelty: false,
+    });
 
-    const preWin = cpToWinPct(preScoreMovingPov);
-    const postWin = cpToWinPct(postScoreMovingPov);
-    const winDrop = preWin - postWin;
+    // 2. Compute accurate win chance drop
+    const CP_CEILING = 1000;
+    const clamp = (v) =>
+      Math.max(-CP_CEILING, Math.min(CP_CEILING, typeof v === 'number' ? v : 0));
+    const preWin = cpToWinPct(clamp(preScore));
+    const postWin = cpToWinPct(clamp(postScore));
+    const winDrop = Math.max(0, preWin - postWin);
 
-    // Check classification
-    if (isEngineBest && winDrop <= 0) {
-      // If significant gain or great find
-      if (winDrop < -8 || (postScoreMovingPov > 200 && preScoreMovingPov < 100)) {
-        return {
-          id: 'brilliant',
-          label: 'Brilliant',
-          symbol: '!!',
-          commentary: `Brilliant move (${san})! Stockfish depth 7 confirms an outstanding positional breakthrough (${evalStr}).`,
-        };
-      }
-      return {
-        id: 'best',
-        label: 'Best Move',
-        symbol: '⊕',
-        commentary: `Best move! Stockfish depth 7 rates ${san} as the top choice (${evalStr}).`,
-      };
-    }
+    // 3. Generate high-fidelity commentary strictly matching the classification
+    let commentary = '';
+    const id = baseClassification.id;
 
-    if (winDrop <= 3) {
-      return {
-        id: 'best',
-        label: 'Best Move',
-        symbol: '⊕',
-        commentary: `Best move! Accurate play with ${san} (${evalStr}).`,
-      };
-    }
-
-    if (winDrop <= 8) {
-      return {
-        id: 'excellent',
-        label: 'Excellent',
-        symbol: '✓',
-        commentary: `Excellent find (${san})! Keeps a firm grip on the position (${evalStr}).`,
-      };
-    }
-
-    if (winDrop <= 18) {
-      return {
-        id: 'good',
-        label: 'Good',
-        symbol: '',
-        commentary: `Good, solid move (${san}). Stockfish depth 7 evaluation: ${evalStr}.`,
-      };
-    }
-
-    if (winDrop <= 38) {
-      return {
-        id: 'inaccuracy',
-        label: 'Inaccuracy',
-        symbol: '?!',
-        commentary: bestMoveSan
-          ? `Inaccuracy (${san}). Stockfish depth 7 preferred ${bestMoveSan} (${evalStr}).`
-          : `Inaccuracy (${san}). Slight concession of initiative (${evalStr}).`,
-      };
-    }
-
-    if (winDrop <= 75) {
-      return {
-        id: 'mistake',
-        label: 'Mistake',
-        symbol: '?',
-        commentary: bestMoveSan
-          ? `Mistake (${san}). Stockfish depth 7 recommends ${bestMoveSan} (${evalStr}).`
-          : `Mistake (${san}). Hands the advantage over (${evalStr}).`,
-      };
+    if (id === 'book') {
+      commentary = isBotvinnik
+        ? bookGames
+          ? `GM Botvinnik plays ${san} from master repertoire (${bookGames} historical games).`
+          : `GM Botvinnik follows master opening theory with ${san}.`
+        : `Book move with ${san}. Following established opening theory.`;
+    } else if (id === 'blunder') {
+      commentary = bestMoveSan
+        ? `Blunder with ${san}. Win chance dropped by ${winDrop.toFixed(0)}% (${evalStr}). Stockfish preferred ${bestMoveSan}.`
+        : `Blunder with ${san}. Major evaluation shift to ${evalStr} (win chance dropped by ${winDrop.toFixed(0)}%).`;
+    } else if (id === 'mistake') {
+      commentary = bestMoveSan
+        ? `Mistake with ${san}. Stockfish 19 preferred ${bestMoveSan} (${evalStr}).`
+        : `Mistake with ${san}. Concedes the advantage (${evalStr}).`;
+    } else if (id === 'inaccuracy') {
+      commentary = bestMoveSan
+        ? `Inaccuracy with ${san}. ${bestMoveSan} was more accurate (${evalStr}).`
+        : `Inaccuracy with ${san}. Slight concession of initiative (${evalStr}).`;
+    } else if (id === 'good') {
+      commentary = `Good move with ${san}. Solid positional play (${evalStr}).`;
+    } else if (id === 'excellent') {
+      commentary = `Excellent move with ${san}. Keeps a firm grip on the position (${evalStr}).`;
+    } else if (id === 'best') {
+      commentary = `Best move with ${san}. Matches Stockfish 19's top engine choice (${evalStr}).`;
+    } else if (id === 'great') {
+      commentary = `Great move with ${san}. A sharp, critical continuation (${evalStr}).`;
+    } else if (id === 'brilliant') {
+      commentary = `Brilliant move with ${san}. Outstanding tactical breakthrough (${evalStr}).`;
+    } else {
+      commentary = `${baseClassification.label} with ${san}. Evaluation: ${evalStr}.`;
     }
 
     return {
-      id: 'blunder',
-      label: 'Blunder',
-      symbol: '??',
-      commentary: bestMoveSan
-        ? `Blunder (${san})! Sharp evaluation swing to ${evalStr}. Critical move was ${bestMoveSan}.`
-        : `Blunder (${san})! Major shift in evaluation (${evalStr}).`,
+      ...baseClassification,
+      commentary,
+      winDrop,
+      preScore,
+      postScore,
     };
   }
 
   terminate() {
+    if (this.searchTimeout) {
+      clearTimeout(this.searchTimeout);
+      this.searchTimeout = null;
+    }
     if (this.worker) {
       try {
         this.worker.postMessage('quit');

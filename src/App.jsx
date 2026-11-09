@@ -2407,16 +2407,6 @@ export default function App() {
             {/* Buttons Area */}
             <div className="flex items-center justify-between gap-1 sm:gap-2 w-full sm:w-auto pb-1 sm:pb-0">
 
-              <button
-                onClick={handleOpenPlayBotvinnik}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-1 sm:gap-1.5 text-[11px] sm:text-sm font-bold text-white bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 px-1 sm:px-3 py-1.5 rounded-lg transition-all shadow-sm border border-amber-600/40 min-w-0"
-                title="Play vs GM Mikhail Botvinnik engine"
-              >
-                <span className="shrink-0 text-amber-200">🏛️</span>
-                <span className="truncate sm:hidden">Botvinnik</span>
-                <span className="truncate hidden sm:inline">Play vs Botvinnik</span>
-              </button>
-
               <a
                 href="https://discord.gg/EDZMXXDvJN"
                 target="_blank"

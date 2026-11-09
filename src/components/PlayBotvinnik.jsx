@@ -5,6 +5,8 @@ import EvalBar from './EvalBar';
 import EvalBadge from './EvalBadge';
 import { BotvinnikController } from '../utils/botvinnikController';
 import { StockfishDepth7Analyzer } from '../utils/stockfishDepth7';
+import { loadOpeningsDatabase } from '../utils/openingsDatabase';
+import { generateMoveExplanation } from '../../functions/enginex/moveExplainer.js';
 
 const BOARD_THEMES = {
   green: { dark: '#769656', light: '#eeeed2' },
@@ -13,6 +15,174 @@ const BOARD_THEMES = {
 
 const PROMOTION_PIECES = ['q', 'r', 'b', 'n'];
 const PROMO_LABELS = { q: '♛', r: '♜', b: '♝', n: '♞' };
+
+const ICON_COLOR = {
+  brilliant:  '#1BACA6',
+  great:      '#5C8BB0',
+  best:       '#96BC4B',
+  excellent:  '#96BC4B',
+  good:       '#96BC4B',
+  inaccuracy: '#F0C45D',
+  miss:       '#E8706A',
+  mistake:    '#E07832',
+  blunder:    '#C93832',
+  book:       '#9B59B6',
+};
+
+const ARROW_COLORS_RGBA = {
+  brilliant:  'rgba(27,172,166,0.85)',
+  great:      'rgba(92,139,176,0.85)',
+  best:       'rgba(150,188,75,0.85)',
+  excellent:  'rgba(150,188,75,0.78)',
+  good:       'rgba(150,188,75,0.68)',
+  inaccuracy: 'rgba(240,196,93,0.88)',
+  miss:       'rgba(232,112,106,0.88)',
+  mistake:    'rgba(224,120,50,0.90)',
+  blunder:    'rgba(201,56,50,0.90)',
+  book:       'rgba(155,89,182,0.78)',
+};
+
+function getTacticLabel(tacticType) {
+  if (!tacticType) return null;
+  return {
+    fork: 'Fork',
+    pin: 'Pin',
+    skewer: 'Skewer',
+    discoveredAttack: 'Discovered Attack',
+    zwischenzug: 'Zwischenzug',
+    xray: 'X-Ray Attack',
+    removalOfDefender: 'Remove the Guard',
+    backRank: 'Back Rank',
+    promotion: 'Promotion',
+    promotionThreat: 'Promotion Threat',
+    zugzwang: 'Zugzwang',
+    prophylaxis: 'Prophylaxis',
+    kingActivity: 'King Activity',
+    enPassant: 'En Passant',
+    firstMove: 'First move',
+    lastBookMove: 'Last book move',
+    bookMove: 'Book move',
+    novelty: 'Novelty',
+  }[tacticType] || (typeof tacticType === 'string' ? tacticType.charAt(0).toUpperCase() + tacticType.slice(1) : null);
+}
+
+function renderFormattedText(text) {
+  if (!text) return null;
+  const parts = text.split(/(\*\*.*?\*\*)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length >= 4) {
+      return (
+        <strong key={index} className="font-black text-gray-900 dark:text-white">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+    const italicParts = part.split(/(\*.*?\*)/g);
+    return italicParts.map((iPart, iIndex) => {
+      if (iPart.startsWith('*') && iPart.endsWith('*') && iPart.length >= 2) {
+        return (
+          <em key={`${index}-${iIndex}`} className="italic opacity-90">
+            {iPart.slice(1, -1)}
+          </em>
+        );
+      }
+      return iPart;
+    });
+  });
+}
+
+function squareToXY(sq, flipped = false) {
+  const file = sq.charCodeAt(0) - 97;
+  const rank = parseInt(sq[1], 10) - 1;
+  const x = flipped ? (7 - file + 0.5) * 100 : (file + 0.5) * 100;
+  const y = flipped ? (rank + 0.5) * 100 : (7 - rank + 0.5) * 100;
+  return { x, y };
+}
+
+function knightCorner(fromSq, toSq) {
+  const fc = fromSq.charCodeAt(0) - 97;
+  const fr = parseInt(fromSq[1], 10) - 1;
+  const tc = toSq.charCodeAt(0) - 97;
+  const tr = parseInt(toSq[1], 10) - 1;
+  const dc = Math.abs(tc - fc);
+  const dr = Math.abs(tr - fr);
+  if (dc >= dr) return String.fromCharCode(97 + tc) + (fr + 1);
+  return String.fromCharCode(97 + fc) + (tr + 1);
+}
+
+function isKnightMove(fromSq, toSq) {
+  if (!fromSq || !toSq || fromSq.length < 2 || toSq.length < 2) return false;
+  const fileDiff = Math.abs(fromSq.charCodeAt(0) - toSq.charCodeAt(0));
+  const rankDiff = Math.abs(parseInt(fromSq[1], 10) - parseInt(toSq[1], 10));
+  return (fileDiff === 2 && rankDiff === 1) || (fileDiff === 1 && rankDiff === 2);
+}
+
+function BoardArrow({ fromSq, toSq, color, flipped = false }) {
+  const A = squareToXY(fromSq, flipped);
+  const B = squareToXY(toSq, flipped);
+
+  const isKnight = isKnightMove(fromSq, toSq);
+  const markerId = `arrow-${fromSq}-${toSq}-${color.replace(/[^a-zA-Z0-9]/g, '')}`;
+
+  const strokeW = 800 / 36;
+  const l = 800 / 32;
+
+  let pathD = '';
+
+  if (isKnight) {
+    const corner = knightCorner(fromSq, toSq);
+    const M = squareToXY(corner, flipped);
+    const mdx = B.x - M.x;
+    const mdy = B.y - M.y;
+    const mlen = Math.sqrt(mdx * mdx + mdy * mdy);
+    if (mlen > 0) {
+      const endX = M.x + (mdx * (mlen - l)) / mlen;
+      const endY = M.y + (mdy * (mlen - l)) / mlen;
+      pathD = `M ${A.x} ${A.y} L ${M.x} ${M.y} L ${endX} ${endY}`;
+    }
+  } else {
+    const dx = B.x - A.x;
+    const dy = B.y - A.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > 0) {
+      const endX = A.x + (dx * (len - l)) / len;
+      const endY = A.y + (dy * (len - l)) / len;
+      pathD = `M ${A.x} ${A.y} L ${endX} ${endY}`;
+    }
+  }
+
+  if (!pathD) return null;
+
+  return (
+    <svg
+      viewBox="0 0 800 800"
+      className="absolute inset-0 w-full h-full pointer-events-none"
+      style={{ zIndex: 10 }}
+    >
+      <defs>
+        <marker
+          id={markerId}
+          markerWidth="2"
+          markerHeight="2.5"
+          refX="1.25"
+          refY="1.25"
+          orient="auto"
+        >
+          <polygon points="0.3 0, 2 1.25, 0.3 2.5" fill={color} />
+        </marker>
+      </defs>
+      <g opacity="0.85">
+        <path
+          d={pathD}
+          fill="none"
+          stroke={color}
+          strokeWidth={strokeW}
+          markerEnd={`url(#${markerId})`}
+        />
+      </g>
+    </svg>
+  );
+}
 
 export default function PlayBotvinnik({
   onExit,
@@ -35,13 +205,20 @@ export default function PlayBotvinnik({
   const [gameResult, setGameResult] = useState(null); // { title, subtitle, winner }
   const [showSideModal, setShowSideModal] = useState(true);
 
+  // Hints state
+  const [showHints, setShowHints] = useState(false);
+  const [coachExpl, setCoachExpl] = useState({
+    text: 'Welcome! Choose your side to challenge 6th World Champion Mikhail Botvinnik. I will analyze your moves live with Stockfish Depth 7.',
+    tacticType: null,
+    classificationId: 'book',
+    label: 'GM Mikhail Botvinnik',
+    badgeType: 'book',
+  });
+
   // Engine live analysis state
   const [liveScore, setLiveScore] = useState(0);
   const [liveEvalStr, setLiveEvalStr] = useState('0.00');
   const [depth7BestMove, setDepth7BestMove] = useState(null);
-  const [latestCommentary, setLatestCommentary] = useState(
-    'Welcome! Choose your side to begin your match against 6th World Champion Mikhail Botvinnik.'
-  );
   const [botvinnikBookNotice, setBotvinnikBookNotice] = useState(null);
 
   // Board UI state
@@ -53,7 +230,25 @@ export default function PlayBotvinnik({
   // Engine refs
   const botvinnikRef = useRef(null);
   const stockfishRef = useRef(null);
-  const lastScoreMovingPovRef = useRef(0);
+  const openingsDbRef = useRef(null);
+
+  // Tracks the evaluation of the board position BEFORE the next move is made:
+  // score: from the perspective of the player to move (in cp)
+  // bestMoveUci: Stockfish 19's top recommended move in this position
+  // bestMoveSan: SAN representation of top move
+  // whiteRelativeScore: eval for EvalBar (+ = White, - = Black)
+  // evalStr: display string e.g. "+0.25", "-M1"
+  // topMoves: MultiPV 2 top moves from Stockfish depth 7
+  // fen: FEN before the move
+  const currentPositionEvalRef = useRef({
+    score: 0,
+    bestMoveUci: null,
+    bestMoveSan: null,
+    whiteRelativeScore: 0,
+    evalStr: '0.00',
+    topMoves: [],
+    fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+  });
 
   // Audio refs
   const audioRefs = useRef({
@@ -75,23 +270,60 @@ export default function PlayBotvinnik({
 
   // Initialize Engines on Mount
   useEffect(() => {
-    botvinnikRef.current = new BotvinnikController(
-      (ready, err) => {
-        if (ready) {
-          console.log('[PlayBotvinnik] GM Botvinnik Engine v1.0 ready');
-        } else {
-          console.warn('[PlayBotvinnik] GM Botvinnik initialization warning:', err);
-        }
-      }
-    );
+    loadOpeningsDatabase()
+      .then((db) => {
+        openingsDbRef.current = db;
+      })
+      .catch((err) => {
+        console.warn('[PlayBotvinnik] Openings DB load warning:', err);
+      });
 
-    stockfishRef.current = new StockfishDepth7Analyzer(
-      (ready) => {
-        if (ready) {
-          console.log('[PlayBotvinnik] Stockfish Depth 7 Analyzer ready');
-        }
+    botvinnikRef.current = new BotvinnikController((ready, err) => {
+      if (ready) {
+        console.log('[PlayBotvinnik] GM Botvinnik Engine v1.0 ready');
+      } else {
+        console.warn('[PlayBotvinnik] GM Botvinnik initialization warning:', err);
       }
-    );
+    });
+
+    stockfishRef.current = new StockfishDepth7Analyzer(async (ready) => {
+      if (ready) {
+        console.log('[PlayBotvinnik] Stockfish 19 Depth 7 Analyzer ready');
+        // Initial evaluation of standard start position
+        try {
+          const initEval = await stockfishRef.current.analyze({
+            fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+            turn: 'w',
+          });
+
+          let bestSan = initEval.bestMoveUci;
+          try {
+            const temp = new Chess();
+            if (initEval.bestMoveUci) {
+              const m = temp.move({
+                from: initEval.bestMoveUci.slice(0, 2),
+                to: initEval.bestMoveUci.slice(2, 4),
+                promotion: initEval.bestMoveUci[4],
+              });
+              if (m) bestSan = m.san;
+            }
+          } catch (_) {}
+
+          currentPositionEvalRef.current = {
+            score: initEval.scoreCp,
+            bestMoveUci: initEval.bestMoveUci,
+            bestMoveSan: bestSan,
+            whiteRelativeScore: initEval.whiteRelativeScore,
+            evalStr: initEval.evalStr,
+            topMoves: initEval.topMoves || [],
+            fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+          };
+          setLiveScore(initEval.whiteRelativeScore);
+          setLiveEvalStr(initEval.evalStr);
+          setDepth7BestMove(bestSan);
+        } catch (_) {}
+      }
+    });
 
     return () => {
       if (botvinnikRef.current) botvinnikRef.current.terminate();
@@ -133,13 +365,13 @@ export default function PlayBotvinnik({
     if (!botvinnikRef.current || checkGameOver()) return;
 
     setIsBotThinking(true);
-    setBotvinnikBookNotice(null);
+    setBotvinnikBookNotice('Thinking...');
 
     const history = chess.history({ verbose: true });
     const uciMoves = history.map((m) => m.from + m.to + (m.promotion || ''));
 
     try {
-      // Botvinnik searches depth 5, optimal for master book lookup + trained WASM positional weights
+      // 1. Botvinnik Engine calculates move based on historical Botvinnik games + positional search
       const result = await botvinnikRef.current.getMove(uciMoves, 5, 800);
 
       if (!result.uci) {
@@ -150,13 +382,19 @@ export default function PlayBotvinnik({
       if (result.isBook) {
         setBotvinnikBookNotice(
           result.bookGames
-            ? `Book move (${result.bookGames} Botvinnik career games)`
+            ? `Book move (${result.bookGames} Botvinnik games)`
             : 'Book move from Botvinnik Repertoire'
         );
+      } else {
+        setBotvinnikBookNotice(null);
       }
 
-      // Record pre-move score for Botvinnik's move evaluation
-      const preScoreMovingPov = lastScoreMovingPovRef.current;
+      // 2. Pre-move evaluation from Botvinnik's perspective
+      const mover = chess.turn();
+      const preScore = currentPositionEvalRef.current.score;
+      const engineBestMove = currentPositionEvalRef.current.bestMoveUci;
+      const engineBestSan = currentPositionEvalRef.current.bestMoveSan;
+      const playedUci = result.uci;
 
       const botMoveObj = chess.move({
         from: result.from,
@@ -178,56 +416,69 @@ export default function PlayBotvinnik({
       const newFen = chess.fen();
       setFen(newFen);
 
-      // Perform Stockfish Depth 7 Analysis on Botvinnik's move
+      // 3. Stockfish 19 evaluates position AFTER Botvinnik's move at Depth 7:
       setIsSfAnalyzing(true);
-      const postHistory = chess.history({ verbose: true });
-      const postUciMoves = postHistory.map((m) => m.from + m.to + (m.promotion || ''));
-
-      let depth7Result = {
+      let postPositionEval = {
+        scoreCp: 0,
+        mateIn: null,
         whiteRelativeScore: 0,
         evalStr: '0.00',
         bestMoveUci: null,
       };
 
       if (stockfishRef.current) {
-        depth7Result = await stockfishRef.current.analyze(postUciMoves, chess.turn());
+        postPositionEval = await stockfishRef.current.analyze({
+          fen: newFen,
+          turn: chess.turn(), // in newFen, turn belongs to player
+        });
       }
 
-      setLiveScore(depth7Result.whiteRelativeScore);
-      setLiveEvalStr(depth7Result.evalStr);
-
-      // Convert best move UCI to SAN if possible
-      let bestMoveSan = depth7Result.bestMoveUci;
+      // Convert player's best continuation to SAN
+      let nextBestMoveSan = postPositionEval.bestMoveUci;
       try {
         const temp = new Chess(newFen);
-        if (depth7Result.bestMoveUci) {
+        if (postPositionEval.bestMoveUci) {
           const m = temp.move({
-            from: depth7Result.bestMoveUci.slice(0, 2),
-            to: depth7Result.bestMoveUci.slice(2, 4),
-            promotion: depth7Result.bestMoveUci[4],
+            from: postPositionEval.bestMoveUci.slice(0, 2),
+            to: postPositionEval.bestMoveUci.slice(2, 4),
+            promotion: postPositionEval.bestMoveUci[4],
           });
-          if (m) bestMoveSan = m.san;
+          if (m) nextBestMoveSan = m.san;
         }
       } catch (_) {}
-      setDepth7BestMove(bestMoveSan);
 
-      // Botvinnik post score from Botvinnik POV (negated opponent score)
-      const postScoreMovingPov = -(depth7Result.sideRelativeScore ?? 0);
-      lastScoreMovingPovRef.current = depth7Result.sideRelativeScore ?? 0;
+      // In newFen, postPositionEval.scoreCp is from opponent's (player's) POV.
+      // So from Botvinnik's POV:
+      const postScore = -postPositionEval.scoreCp;
 
-      const classification = stockfishRef.current?.classifyMove({
-        preScoreMovingPov,
-        postScoreMovingPov,
+      // 4. Classify Botvinnik's move strictly using BoardSight's original moveClassifier
+      const classification = stockfishRef.current?.classify({
+        preScore,
+        postScore,
+        engineBestMove,
+        playerMoveUCI: playedUci,
         isBookMove: result.isBook,
-        isEngineBest: result.uci === depth7Result.bestMoveUci,
         san: botMoveObj.san,
         isBotvinnik: true,
         bookGames: result.bookGames,
-        evalStr: depth7Result.evalStr,
-        bestMoveSan,
+        evalStr: postPositionEval.evalStr,
+        bestMoveSan: engineBestSan,
       }) || { id: result.isBook ? 'book' : 'good', label: result.isBook ? 'Book Move' : 'Good', symbol: '', commentary: `GM Botvinnik plays ${botMoveObj.san}.` };
 
-      setLatestCommentary(classification.commentary);
+      // 5. Update position evaluation for Player's upcoming move
+      currentPositionEvalRef.current = {
+        score: postPositionEval.scoreCp,
+        bestMoveUci: postPositionEval.bestMoveUci,
+        bestMoveSan: nextBestMoveSan,
+        whiteRelativeScore: postPositionEval.whiteRelativeScore,
+        evalStr: postPositionEval.evalStr,
+        topMoves: postPositionEval.topMoves || [],
+        fen: newFen,
+      };
+
+      setLiveScore(postPositionEval.whiteRelativeScore);
+      setLiveEvalStr(postPositionEval.evalStr);
+      setDepth7BestMove(nextBestMoveSan);
 
       setMoves((prev) => {
         const updated = [
@@ -240,10 +491,11 @@ export default function PlayBotvinnik({
             to: result.to,
             color: botMoveObj.color,
             fen: newFen,
-            evalStr: depth7Result.evalStr,
-            whiteScore: depth7Result.whiteRelativeScore,
+            evalStr: postPositionEval.evalStr,
+            whiteScore: postPositionEval.whiteRelativeScore,
             classification,
-            bestMoveSan,
+            bestMoveSan: engineBestSan,
+            engineBestMove,
             isBook: result.isBook,
             bookGames: result.bookGames,
           },
@@ -263,10 +515,15 @@ export default function PlayBotvinnik({
 
   // Handle Player's Move
   const handlePlayerMove = useCallback(async (from, to, promotion = '') => {
-    // If not player's turn or game over, ignore
     if (chess.turn() !== playerSide || gameResult || isBotThinking) return false;
 
-    const preScoreMovingPov = lastScoreMovingPovRef.current;
+    // 1. Capture the moving side's evaluation BEFORE the move is executed:
+    const mover = chess.turn();
+    const preScore = currentPositionEvalRef.current.score;
+    const engineBestMove = currentPositionEvalRef.current.bestMoveUci;
+    const engineBestSan = currentPositionEvalRef.current.bestMoveSan;
+    const preFen = currentPositionEvalRef.current.fen || chess.fen();
+    const playedUci = from + to + (promotion ? promotion.toLowerCase() : '');
 
     let moveObj = null;
     try {
@@ -286,53 +543,126 @@ export default function PlayBotvinnik({
     const newFen = chess.fen();
     setFen(newFen);
 
-    // Run Stockfish Depth 7 on Player's Move
-    setIsSfAnalyzing(true);
-    const history = chess.history({ verbose: true });
-    const uciMoves = history.map((m) => m.from + m.to + (m.promotion || ''));
+    // Check if player's move is in the master openings database
+    let isBook = false;
+    if (openingsDbRef.current) {
+      const currentSanHistory = chess.history();
+      const match = openingsDbRef.current.lookupByMoves(currentSanHistory);
+      if (match && currentSanHistory.length <= match.bookDepth) {
+        isBook = true;
+      }
+    }
 
-    let depth7Result = {
+    // 2. Evaluate position AFTER the move with Stockfish 19 at Depth 7:
+    setIsSfAnalyzing(true);
+    let postPositionEval = {
+      scoreCp: 0,
+      mateIn: null,
       whiteRelativeScore: 0,
       evalStr: '0.00',
       bestMoveUci: null,
+      topMoves: [],
     };
 
     if (stockfishRef.current) {
-      depth7Result = await stockfishRef.current.analyze(uciMoves, chess.turn());
+      postPositionEval = await stockfishRef.current.analyze({
+        fen: newFen,
+        turn: chess.turn(), // in newFen, turn belongs to opponent
+      });
     }
 
-    setLiveScore(depth7Result.whiteRelativeScore);
-    setLiveEvalStr(depth7Result.evalStr);
-
-    let bestMoveSan = depth7Result.bestMoveUci;
+    // Convert opponent's best response to SAN
+    let nextBestMoveSan = postPositionEval.bestMoveUci;
     try {
       const temp = new Chess(newFen);
-      if (depth7Result.bestMoveUci) {
+      if (postPositionEval.bestMoveUci) {
         const m = temp.move({
-          from: depth7Result.bestMoveUci.slice(0, 2),
-          to: depth7Result.bestMoveUci.slice(2, 4),
-          promotion: depth7Result.bestMoveUci[4],
+          from: postPositionEval.bestMoveUci.slice(0, 2),
+          to: postPositionEval.bestMoveUci.slice(2, 4),
+          promotion: postPositionEval.bestMoveUci[4],
         });
-        if (m) bestMoveSan = m.san;
+        if (m) nextBestMoveSan = m.san;
       }
     } catch (_) {}
-    setDepth7BestMove(bestMoveSan);
 
-    const postScoreMovingPov = -(depth7Result.sideRelativeScore ?? 0);
-    lastScoreMovingPovRef.current = depth7Result.sideRelativeScore ?? 0;
+    // In newFen, postPositionEval.scoreCp is from opponent's POV.
+    // So from the moving player's POV:
+    const postScore = -postPositionEval.scoreCp;
 
-    const classification = stockfishRef.current?.classifyMove({
-      preScoreMovingPov,
-      postScoreMovingPov,
-      isBookMove: moves.length < 4, // early moves can be book
-      isEngineBest: (from + to + (promotion || '')) === depth7Result.bestMoveUci,
+    // 3. Classify strictly using BoardSight's original moveClassifier:
+    const classification = stockfishRef.current?.classify({
+      preScore,
+      postScore,
+      engineBestMove,
+      playerMoveUCI: playedUci,
+      isBookMove: isBook,
       san: moveObj.san,
       isBotvinnik: false,
-      evalStr: depth7Result.evalStr,
-      bestMoveSan,
+      evalStr: postPositionEval.evalStr,
+      bestMoveSan: engineBestSan, // What Stockfish recommended instead of the played move
     }) || { id: 'good', label: 'Good', symbol: '', commentary: `You played ${moveObj.san}.` };
 
-    setLatestCommentary(classification.commentary);
+    // Generate fresh authentic Game Review Coach Explanation for User's Move
+    let freshCoachExpl = null;
+    try {
+      freshCoachExpl = generateMoveExplanation({
+        move: {
+          san: moveObj.san,
+          from,
+          to,
+          color: playerSide,
+          piece: moveObj.piece,
+          captured: moveObj.captured,
+        },
+        preFen,
+        fen: newFen,
+        classification,
+        bestMoveSan: engineBestSan,
+        loss: classification.winDrop,
+        preScore,
+        postScore,
+        whiteScore: postPositionEval.whiteRelativeScore,
+        isBookMove: isBook,
+        moveNumber: Math.ceil(chess.history().length / 2),
+        engineTopMoves: [
+          {
+            uci: postPositionEval.bestMoveUci,
+            san: nextBestMoveSan,
+            scoreCp: postPositionEval.scoreCp,
+            pv: postPositionEval.pv || [],
+          },
+        ],
+        playerMoveUCI: playedUci,
+        perspectiveColor: playerSide,
+        history: chess.history({ verbose: true }),
+      });
+    } catch (err) {
+      console.warn('[PlayBotvinnik] Coach explanation generation error:', err);
+    }
+
+    const userCoachObj = {
+      text: freshCoachExpl?.text || classification.commentary,
+      tacticType: freshCoachExpl?.tacticType || null,
+      classificationId: classification.id,
+      label: classification.label,
+      badgeType: classification.id,
+    };
+    setCoachExpl(userCoachObj);
+
+    // 4. Update current position eval for opponent's upcoming move:
+    currentPositionEvalRef.current = {
+      score: postPositionEval.scoreCp,
+      bestMoveUci: postPositionEval.bestMoveUci,
+      bestMoveSan: nextBestMoveSan,
+      whiteRelativeScore: postPositionEval.whiteRelativeScore,
+      evalStr: postPositionEval.evalStr,
+      topMoves: postPositionEval.topMoves || [],
+      fen: newFen,
+    };
+
+    setLiveScore(postPositionEval.whiteRelativeScore);
+    setLiveEvalStr(postPositionEval.evalStr);
+    setDepth7BestMove(nextBestMoveSan);
 
     setMoves((prev) => {
       const updated = [
@@ -340,16 +670,18 @@ export default function PlayBotvinnik({
         {
           ply: prev.length + 1,
           san: moveObj.san,
-          uci: from + to + (promotion || ''),
+          uci: playedUci,
           from,
           to,
           color: moveObj.color,
           fen: newFen,
-          evalStr: depth7Result.evalStr,
-          whiteScore: depth7Result.whiteRelativeScore,
+          evalStr: postPositionEval.evalStr,
+          whiteScore: postPositionEval.whiteRelativeScore,
           classification,
-          bestMoveSan,
-          isBook: false,
+          bestMoveSan: engineBestSan,
+          engineBestMove,
+          isBook,
+          coachExplanation: userCoachObj,
         },
       ];
       setCurrentIdx(updated.length - 1);
@@ -366,10 +698,10 @@ export default function PlayBotvinnik({
     }
 
     return true;
-  }, [chess, playerSide, gameResult, isBotThinking, playSound, moves.length, checkGameOver, triggerBotvinnikMove]);
+  }, [chess, playerSide, gameResult, isBotThinking, playSound, checkGameOver, triggerBotvinnikMove]);
 
   // Start New Match
-  const startNewMatch = useCallback((selectedSide) => {
+  const startNewMatch = useCallback(async (selectedSide) => {
     let side = selectedSide;
     if (side === 'random') {
       side = Math.random() < 0.5 ? 'w' : 'b';
@@ -387,17 +719,56 @@ export default function PlayBotvinnik({
     setDepth7BestMove(null);
     setBotvinnikBookNotice(null);
     setShowSideModal(false);
-    lastScoreMovingPovRef.current = 0;
 
     if (botvinnikRef.current) {
       botvinnikRef.current.newGame();
     }
 
-    setLatestCommentary(
-      side === 'w'
-        ? "You are playing as White. Make your first move to challenge GM Mikhail Botvinnik!"
-        : "You are playing as Black. GM Mikhail Botvinnik will open the game!"
-    );
+    // Evaluate initial starting position with Stockfish 19 Depth 7
+    if (stockfishRef.current) {
+      try {
+        const initEval = await stockfishRef.current.analyze({
+          fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+          turn: 'w',
+        });
+        let bestSan = initEval.bestMoveUci;
+        try {
+          const temp = new Chess();
+          if (initEval.bestMoveUci) {
+            const m = temp.move({
+              from: initEval.bestMoveUci.slice(0, 2),
+              to: initEval.bestMoveUci.slice(2, 4),
+              promotion: initEval.bestMoveUci[4],
+            });
+            if (m) bestSan = m.san;
+          }
+        } catch (_) {}
+
+        currentPositionEvalRef.current = {
+          score: initEval.scoreCp,
+          bestMoveUci: initEval.bestMoveUci,
+          bestMoveSan: bestSan,
+          whiteRelativeScore: initEval.whiteRelativeScore,
+          evalStr: initEval.evalStr,
+          topMoves: initEval.topMoves || [],
+          fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+        };
+        setLiveScore(initEval.whiteRelativeScore);
+        setLiveEvalStr(initEval.evalStr);
+        setDepth7BestMove(bestSan);
+      } catch (_) {}
+    }
+
+    setCoachExpl({
+      text:
+        side === 'w'
+          ? "You are playing as White. Make your first move to challenge 6th World Champion Mikhail Botvinnik!"
+          : "You are playing as Black. GM Mikhail Botvinnik will open the game. Calculate sharply!",
+      tacticType: null,
+      classificationId: 'book',
+      label: 'GM Mikhail Botvinnik',
+      badgeType: 'book',
+    });
 
     // If player is Black, Botvinnik makes the opening move!
     if (side === 'b') {
@@ -408,7 +779,7 @@ export default function PlayBotvinnik({
   }, [chess, triggerBotvinnikMove]);
 
   // Takeback (Undo 2 moves if player's turn, or 1 move)
-  const handleTakeback = useCallback(() => {
+  const handleTakeback = useCallback(async () => {
     if (isBotThinking || moves.length === 0 || gameResult) return;
 
     let undoCount = 0;
@@ -430,7 +801,51 @@ export default function PlayBotvinnik({
     setFen(newFen);
     setMoves(remainingMoves);
     setCurrentIdx(remainingMoves.length - 1);
-    setLatestCommentary('Move taken back. It is your turn to play.');
+
+    // Re-evaluate the restored position with Stockfish 19 Depth 7:
+    if (stockfishRef.current) {
+      try {
+        const restoredEval = await stockfishRef.current.analyze({
+          fen: newFen,
+          turn: chess.turn(),
+        });
+
+        let bestSan = restoredEval.bestMoveUci;
+        try {
+          const temp = new Chess(newFen);
+          if (restoredEval.bestMoveUci) {
+            const m = temp.move({
+              from: restoredEval.bestMoveUci.slice(0, 2),
+              to: restoredEval.bestMoveUci.slice(2, 4),
+              promotion: restoredEval.bestMoveUci[4],
+            });
+            if (m) bestSan = m.san;
+          }
+        } catch (_) {}
+
+        currentPositionEvalRef.current = {
+          score: restoredEval.scoreCp,
+          bestMoveUci: restoredEval.bestMoveUci,
+          bestMoveSan: bestSan,
+          whiteRelativeScore: restoredEval.whiteRelativeScore,
+          evalStr: restoredEval.evalStr,
+          topMoves: restoredEval.topMoves || [],
+          fen: newFen,
+        };
+
+        setLiveScore(restoredEval.whiteRelativeScore);
+        setLiveEvalStr(restoredEval.evalStr);
+        setDepth7BestMove(bestSan);
+      } catch (_) {}
+    }
+
+    setCoachExpl({
+      text: 'Move taken back. It is your turn to play.',
+      tacticType: null,
+      classificationId: 'book',
+      label: 'Coach Botvinnik',
+      badgeType: 'book',
+    });
   }, [chess, playerSide, moves, isBotThinking, gameResult]);
 
   // Resign
@@ -617,6 +1032,102 @@ export default function PlayBotvinnik({
     return styles;
   }, [activeDisplayMove, selectedSquare, legalTargets]);
 
+  // Active Coach Explanation (focused strictly on player's moves, no explanations generated for Botvinnik moves)
+  const activeCoachExpl = useMemo(() => {
+    if (currentIdx === -1) {
+      return {
+        text:
+          playerSide === 'w'
+            ? 'You are playing as White. Make your first move to challenge 6th World Champion Mikhail Botvinnik!'
+            : 'You are playing as Black. GM Mikhail Botvinnik will open the game. Calculate sharply!',
+        tacticType: null,
+        classificationId: 'book',
+        label: 'GM Mikhail Botvinnik',
+        badgeType: 'book',
+      };
+    }
+
+    const activeMove = moves[currentIdx];
+    if (!activeMove) return coachExpl;
+
+    // If this move was made by player and has a coach explanation:
+    if (activeMove.color === playerSide && activeMove.coachExplanation) {
+      return activeMove.coachExplanation;
+    }
+
+    // If this move was made by Botvinnik, show the player's preceding move explanation
+    if (currentIdx > 0 && moves[currentIdx - 1]?.color === playerSide && moves[currentIdx - 1]?.coachExplanation) {
+      return moves[currentIdx - 1].coachExplanation;
+    }
+
+    return coachExpl;
+  }, [currentIdx, moves, playerSide, coachExpl]);
+
+  // Hint Arrows (Live Depth 7 MultiPV 2 in Orange)
+  const hintArrows = useMemo(() => {
+    if (!showHints) return [];
+    const currentTop = currentPositionEvalRef.current?.topMoves || [];
+    const ORANGE_COLORS = [
+      'rgba(224, 120, 50, 0.95)', // Line 1: primary orange
+      'rgba(240, 160, 75, 0.85)', // Line 2: secondary lighter orange
+    ];
+    const result = [];
+    for (let i = 0; i < Math.min(currentTop.length, 2); i++) {
+      const moveInfo = currentTop[i];
+      if (!moveInfo?.bestMoveUci || moveInfo.bestMoveUci === '(none)') continue;
+      const from = moveInfo.bestMoveUci.slice(0, 2);
+      const to = moveInfo.bestMoveUci.slice(2, 4);
+      const isKnight = isKnightMove(from, to);
+      result.push({
+        from,
+        to,
+        colorRgba: ORANGE_COLORS[i],
+        colorHex: i === 0 ? '#E07832' : '#F0A04B',
+        isKnight,
+        rank: i + 1,
+      });
+    }
+    return result;
+  }, [showHints, fen, moves.length]);
+
+  const customArrows = useMemo(() => {
+    // 1. If hints are ON, draw live MultiPV 2 best move straight arrows in orange
+    if (showHints && hintArrows.length > 0) {
+      const arrows = [];
+      hintArrows.forEach((h) => {
+        if (!h.isKnight) {
+          arrows.push([h.from, h.to, h.colorRgba]);
+        }
+      });
+      return arrows;
+    }
+
+    // 2. Otherwise (hints OFF), Game Review move arrows
+    if (!activeDisplayMove) return [];
+    const cid = activeDisplayMove.classification?.id;
+    const badMoveClasses = ['inaccuracy', 'mistake', 'miss', 'blunder'];
+
+    // If a blunder / mistake / miss / inaccuracy was played, show arrow for the engine's suggested best move
+    if (badMoveClasses.includes(cid) && activeDisplayMove.engineBestMove) {
+      const eFrom = activeDisplayMove.engineBestMove.slice(0, 2);
+      const eTo = activeDisplayMove.engineBestMove.slice(2, 4);
+      if (!isKnightMove(eFrom, eTo) && (eFrom !== activeDisplayMove.from || eTo !== activeDisplayMove.to)) {
+        const rgba = ARROW_COLORS_RGBA[cid] || 'rgba(201,56,50,0.85)';
+        return [[eFrom, eTo, rgba]];
+      }
+    }
+
+    // If brilliant / great / best / excellent move, show arrow for the move played in its classification color
+    if (['brilliant', 'great', 'best', 'excellent'].includes(cid) && activeDisplayMove.from && activeDisplayMove.to) {
+      if (!isKnightMove(activeDisplayMove.from, activeDisplayMove.to)) {
+        const rgba = ARROW_COLORS_RGBA[cid] || 'rgba(150,188,75,0.85)';
+        return [[activeDisplayMove.from, activeDisplayMove.to, rgba]];
+      }
+    }
+
+    return [];
+  }, [showHints, hintArrows, activeDisplayMove]);
+
   const currentMoveForBoard = activeDisplayMove?.fen ? activeDisplayMove.fen : fen;
 
   return (
@@ -751,6 +1262,7 @@ export default function PlayBotvinnik({
                   customDarkSquareStyle={darkSquareStyle}
                   customLightSquareStyle={lightSquareStyle}
                   customSquareStyles={squareStyles}
+                  customArrows={customArrows}
                   animationDuration={150}
                   boardOrientation={flipped ? 'black' : 'white'}
                   arePiecesDraggable={chess.turn() === playerSide && !gameResult && !isBotThinking}
@@ -781,6 +1293,38 @@ export default function PlayBotvinnik({
                       <EvalBadge type={activeDisplayMove.classification.id} />
                     </div>
                   );
+                })()}
+
+                {/* Hint Knight Arrows (when hints ON: vivid orange L-shaped arrows for Depth 7 MultiPV 2) */}
+                {showHints && !pendingPromotion && hintArrows.filter((h) => h.isKnight).map((h, idx) => (
+                  <BoardArrow
+                    key={`hint-knight-${h.from}-${h.to}-${idx}`}
+                    fromSq={h.from}
+                    toSq={h.to}
+                    color={h.colorHex}
+                    flipped={flipped}
+                  />
+                ))}
+
+                {/* Game Review Knight Arrow (when hints OFF: L-shaped arrow for blunders/mistakes pointing to best move, or good moves) */}
+                {!showHints && activeDisplayMove && !pendingPromotion && (() => {
+                  const cid = activeDisplayMove.classification?.id;
+                  const badMoveClasses = ['inaccuracy', 'mistake', 'miss', 'blunder'];
+                  if (badMoveClasses.includes(cid) && activeDisplayMove.engineBestMove) {
+                    const eFrom = activeDisplayMove.engineBestMove.slice(0, 2);
+                    const eTo = activeDisplayMove.engineBestMove.slice(2, 4);
+                    if (isKnightMove(eFrom, eTo) && (eFrom !== activeDisplayMove.from || eTo !== activeDisplayMove.to)) {
+                      const hex = ICON_COLOR[cid] || '#c93832';
+                      return <BoardArrow key={`rev-knight-${eFrom}-${eTo}`} fromSq={eFrom} toSq={eTo} color={hex} flipped={flipped} />;
+                    }
+                  }
+                  if (['brilliant', 'great', 'best', 'excellent'].includes(cid) && activeDisplayMove.from && activeDisplayMove.to) {
+                    if (isKnightMove(activeDisplayMove.from, activeDisplayMove.to)) {
+                      const hex = ICON_COLOR[cid] || '#96bc4b';
+                      return <BoardArrow key={`rev-knight-${activeDisplayMove.from}-${activeDisplayMove.to}`} fromSq={activeDisplayMove.from} toSq={activeDisplayMove.to} color={hex} flipped={flipped} />;
+                    }
+                  }
+                  return null;
                 })()}
 
                 {/* Inline Promotion Picker */}
@@ -867,6 +1411,18 @@ export default function PlayBotvinnik({
                 ↩️ Takeback
               </button>
               <button
+                onClick={() => setShowHints(!showHints)}
+                className={`flex-1 py-2 text-xs font-bold rounded-lg border transition-all shadow-sm flex items-center justify-center gap-1.5 ${
+                  showHints
+                    ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-amber-500/20 font-black'
+                    : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-slate-700 hover:bg-gray-50 dark:hover:bg-slate-700 text-gray-700 dark:text-slate-200'
+                }`}
+                title="Toggle live Stockfish Depth 7 MultiPV 2 hint arrows"
+              >
+                <span>💡</span>
+                <span>Hints {showHints ? 'ON' : 'OFF'}</span>
+              </button>
+              <button
                 onClick={handleResign}
                 disabled={!!gameResult}
                 className="flex-1 py-2 text-xs font-bold rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-400 hover:bg-red-100 disabled:opacity-40 transition-colors shadow-sm"
@@ -877,77 +1433,83 @@ export default function PlayBotvinnik({
           </div>
 
           {/* ══════════════════════════════════════════
-              RIGHT: Live Stockfish Depth 7 Analysis + Commentary + Moves
+              RIGHT: Live Stockfish Depth 7 Coach + Moves + Review
           ══════════════════════════════════════════ */}
           <div className="w-full lg:flex-1 max-w-[550px] flex flex-col gap-3">
 
-            {/* 1. Live Depth 7 Analysis Card */}
+            {/* 1. Coach Bar: Authentic Game Review Coach Bar with Botvinnik Avatar */}
             <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 border border-gray-200 dark:border-slate-700 shadow-sm flex flex-col gap-3">
-              <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-700 pb-3">
+              <div className="flex items-center justify-between border-b border-gray-100 dark:border-slate-700 pb-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-base">⚡</span>
-                  <span className="font-black text-sm uppercase tracking-wider text-gray-700 dark:text-slate-200">
-                    Stockfish 19 Live Analysis
+                  <span className="text-base">🎓</span>
+                  <span className="font-black text-xs uppercase tracking-wider text-gray-700 dark:text-slate-200">
+                    Grandmaster Analysis &amp; Coach
                   </span>
                 </div>
-                <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                  Depth 7
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                    Stockfish 19 Depth 7
+                  </span>
+                </div>
               </div>
 
-              {/* Score & Best Move Grid */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-gray-50 dark:bg-slate-900/70 rounded-xl p-3 border border-gray-100 dark:border-slate-700 flex flex-col justify-center">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Position Eval</span>
-                  <div className="flex items-baseline gap-1 mt-0.5">
-                    <span className="text-2xl font-black tabular-nums tracking-tight text-gray-900 dark:text-slate-100">
-                      {liveEvalStr}
-                    </span>
-                    <span className="text-[11px] text-gray-500">
-                      {parseFloat(liveEvalStr) > 0 ? '(White)' : parseFloat(liveEvalStr) < 0 ? '(Black)' : '(Even)'}
-                    </span>
+              {/* Coach Bar Container */}
+              <div className="relative flex-shrink-0 py-1 flex items-center gap-3">
+                {/* Avatar Container - Left Side */}
+                <div className="relative flex-shrink-0 w-[90px] h-[90px] sm:w-[105px] sm:h-[105px] flex items-center justify-center">
+                  {/* Persistent Vapor Glow Behind Coach */}
+                  <div className="absolute inset-0 pointer-events-none z-0 flex items-center justify-center">
+                    <div className="w-[85px] h-[85px] sm:w-[95px] sm:h-[95px] bg-gradient-to-tr from-amber-500/20 via-orange-500/20 to-purple-500/20 rounded-full blur-xl animate-pulse"></div>
+                    <div className="absolute w-[50px] h-[50px] bg-gradient-to-br from-amber-400/20 to-emerald-600/20 rounded-full blur-lg animate-bounce" style={{ animationDuration: '3s' }}></div>
+                  </div>
+
+                  {/* Coach Avatar (Botvinnik Portrait) */}
+                  <div className="relative z-10 w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden shadow-lg border-2 border-white dark:border-slate-700 ring-2 ring-amber-500/30 bg-slate-200 dark:bg-slate-700">
+                    <img
+                      src="/botvinnik.jpg"
+                      alt="GM Mikhail Botvinnik"
+                      className="w-full h-full object-cover object-top"
+                      onError={(e) => {
+                        e.target.src = '/botvinnik/botvinnik.jpg';
+                      }}
+                    />
                   </div>
                 </div>
 
-                <div className="bg-gray-50 dark:bg-slate-900/70 rounded-xl p-3 border border-gray-100 dark:border-slate-700 flex flex-col justify-center">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Best Continuation</span>
-                  <span className="text-lg font-black text-emerald-600 dark:text-emerald-400 truncate mt-0.5">
-                    {depth7BestMove ? depth7BestMove : 'Calculating...'}
-                  </span>
-                </div>
-              </div>
+                {/* Speech Bubble / Content */}
+                <div className="relative flex-1 bg-[#e9ecef] dark:bg-slate-700 rounded-2xl p-3.5 shadow-sm min-h-[85px] flex flex-col justify-center ml-2 border border-gray-200/60 dark:border-slate-600/60">
+                  {/* Curved SVG Tail — concave curves matching reference */}
+                  <svg className="absolute -left-[12px] top-1/2 -translate-y-1/2 w-[13px] h-[22px] text-[#e9ecef] dark:text-slate-700" viewBox="0 0 13 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M13 0 C13 8 1 7 0 11 C1 15 13 14 13 22" fill="currentColor" />
+                  </svg>
 
-              {/* Latest Move Classification Pill */}
-              {activeDisplayMove && (
-                <div className="flex items-center gap-2 pt-1">
-                  <span className="text-xs font-bold text-gray-500">Last Move:</span>
-                  <span className="font-black text-sm">{activeDisplayMove.san}</span>
-                  {activeDisplayMove.classification && (
-                    <span
-                      className={`text-xs font-black px-2 py-0.5 rounded-full flex items-center gap-1.5 shadow-xs ${
-                        ['blunder', 'mistake'].includes(activeDisplayMove.classification.id)
-                          ? 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400 border border-red-200'
-                          : activeDisplayMove.classification.id === 'inaccuracy'
-                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 border border-amber-200'
-                          : activeDisplayMove.classification.id === 'book'
-                          ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-400 border border-purple-200'
-                          : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200'
-                      }`}
-                    >
-                      <EvalBadge type={activeDisplayMove.classification.id} />
-                      <span>{activeDisplayMove.classification.label}</span>
-                      {activeDisplayMove.classification.symbol && (
-                        <span>{activeDisplayMove.classification.symbol}</span>
+                  <div className="flex items-start gap-2.5 w-full relative z-10">
+                    {/* Left: badge */}
+                    {activeCoachExpl?.badgeType && (
+                      <div className="w-[18px] h-[18px] shrink-0 mt-0.5">
+                        <EvalBadge type={activeCoachExpl.badgeType} />
+                      </div>
+                    )}
+
+                    {/* Right: tactic label + explanation text */}
+                    <div className="flex flex-col justify-center flex-1 min-w-0">
+                      {(activeCoachExpl?.tacticType || activeCoachExpl?.label) && (
+                        <span
+                          className="text-[11px] font-black uppercase tracking-wider mb-0.5"
+                          style={{ color: ICON_COLOR[activeCoachExpl?.badgeType] || '#4a7c59' }}
+                        >
+                          {getTacticLabel(activeCoachExpl?.tacticType) || activeCoachExpl?.label}
+                        </span>
                       )}
-                    </span>
-                  )}
+                      {/* Scrollable explanation box */}
+                      <div className="overflow-y-auto max-h-[140px] pr-2 custom-scrollbar">
+                        <p className="text-[13.5px] sm:text-[14px] leading-relaxed font-medium text-gray-800 dark:text-slate-100 whitespace-pre-wrap">
+                          {renderFormattedText(activeCoachExpl?.text || 'Make your move to challenge 6th World Champion Mikhail Botvinnik!')}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              )}
-
-              {/* Coach / Depth 7 Commentary Box */}
-              <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 border border-gray-200 dark:border-slate-700 text-xs sm:text-[13px] leading-relaxed text-gray-700 dark:text-slate-300 flex items-start gap-2.5">
-                <span className="text-lg shrink-0 mt-0.5">💬</span>
-                <p className="flex-1 font-medium">{latestCommentary}</p>
               </div>
             </div>
 
@@ -1010,41 +1572,60 @@ export default function PlayBotvinnik({
                       return (
                         <React.Fragment key={movePairIdx}>
                           {/* White Move */}
-                          <div
+                          <button
+                            type="button"
                             onClick={() => setCurrentIdx(movePairIdx * 2)}
-                            className={`flex items-center justify-between px-2 py-1 rounded cursor-pointer transition-colors ${
+                            className={`w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
                               whiteActive
-                                ? 'bg-amber-100 dark:bg-amber-900/40 font-black'
-                                : 'hover:bg-gray-50 dark:hover:bg-slate-700/50 font-medium'
+                                ? 'bg-[#4a7c59] text-white shadow-sm font-bold'
+                                : 'hover:bg-gray-100 dark:hover:bg-slate-700/60 font-medium'
                             }`}
                           >
-                            <span className="text-gray-400 w-6">{movePairIdx + 1}.</span>
-                            <span className="font-bold">{whiteMove?.san}</span>
-                            {whiteMove?.classification && (
-                              <span className="text-[10px] text-gray-400 font-bold ml-1">
-                                {whiteMove.classification.symbol || '✓'}
-                              </span>
-                            )}
-                          </div>
+                            <span className={`text-xs ${whiteActive ? 'text-white/70' : 'text-gray-400'} w-5 shrink-0`}>
+                              {movePairIdx + 1}.
+                            </span>
+                            {whiteMove?.classification?.id ? (
+                              <div className="w-4 h-4 shrink-0 flex items-center justify-center">
+                                <EvalBadge type={whiteMove.classification.id} />
+                              </div>
+                            ) : null}
+                            <span
+                              className="flex-1 truncate text-xs font-semibold leading-none"
+                              style={{ color: whiteActive ? 'white' : (ICON_COLOR[whiteMove?.classification?.id] || 'inherit') }}
+                            >
+                              {whiteMove?.san}
+                            </span>
+                          </button>
 
                           {/* Black Move */}
-                          <div
-                            onClick={() => blackMove && setCurrentIdx(movePairIdx * 2 + 1)}
-                            className={`flex items-center justify-between px-2 py-1 rounded transition-colors ${
-                              blackMove ? 'cursor-pointer' : ''
-                            } ${
-                              blackActive
-                                ? 'bg-amber-100 dark:bg-amber-900/40 font-black'
-                                : 'hover:bg-gray-50 dark:hover:bg-slate-700/50 font-medium'
-                            }`}
-                          >
-                            <span className="font-bold">{blackMove ? blackMove.san : ''}</span>
-                            {blackMove?.classification && (
-                              <span className="text-[10px] text-gray-400 font-bold ml-1">
-                                {blackMove.classification.symbol || '✓'}
+                          {blackMove ? (
+                            <button
+                              type="button"
+                              onClick={() => setCurrentIdx(movePairIdx * 2 + 1)}
+                              className={`w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-1.5 transition-all ${
+                                blackActive
+                                  ? 'bg-[#4a7c59] text-white shadow-sm font-bold'
+                                  : 'hover:bg-gray-100 dark:hover:bg-slate-700/60 font-medium'
+                              }`}
+                            >
+                              <span className={`text-xs ${blackActive ? 'text-white/70' : 'text-gray-400'} w-4 shrink-0`}>
+                                ...
                               </span>
-                            )}
-                          </div>
+                              {blackMove.classification?.id ? (
+                                <div className="w-4 h-4 shrink-0 flex items-center justify-center">
+                                  <EvalBadge type={blackMove.classification.id} />
+                                </div>
+                              ) : null}
+                              <span
+                                className="flex-1 truncate text-xs font-semibold leading-none"
+                                style={{ color: blackActive ? 'white' : (ICON_COLOR[blackMove.classification?.id] || 'inherit') }}
+                              >
+                                {blackMove.san}
+                              </span>
+                            </button>
+                          ) : (
+                            <div className="w-full" />
+                          )}
                         </React.Fragment>
                       );
                     })}
