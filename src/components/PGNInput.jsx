@@ -234,38 +234,6 @@ export default function PGNInput({
         ) : 'Start Review')}
       </button>
 
-      {/* Play v/s GM Botvinnik Banner Card */}
-      <div
-        onClick={handleOpenBotvinnik}
-        className="mt-2.5 shrink-0 w-full border border-amber-300/80 dark:border-amber-700/60 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 dark:from-slate-800 dark:via-amber-950/20 dark:to-slate-800 hover:border-amber-400 dark:hover:border-amber-500 rounded-xl p-2.5 sm:p-3 transition-all cursor-pointer shadow-xs flex items-center justify-between group active:scale-[0.99]"
-      >
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/50 border border-amber-300 dark:border-amber-700/60 flex items-center justify-center text-xl shadow-xs group-hover:scale-110 transition-transform shrink-0">
-            👴
-          </div>
-          <div className="flex flex-col">
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs sm:text-sm font-black text-gray-900 dark:text-slate-100 leading-tight">
-                Play v/s GM Botvinnik
-              </span>
-              <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500 text-white shadow-xs">
-                NEW
-              </span>
-            </div>
-            <span className="text-[10px] sm:text-[11px] font-medium text-gray-500 dark:text-slate-400 mt-0.5 line-clamp-1">
-              Trained on 919 GM games · Stockfish Depth 7 Live Analysis
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1 text-xs font-bold text-amber-700 dark:text-amber-400 group-hover:translate-x-1 transition-transform shrink-0 ml-2">
-          <span>Play</span>
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-          </svg>
-        </div>
-      </div>
-
       <div className="mt-3 flex-1 flex flex-col shrink-0 lg:shrink">
         <GameImport onAnalyze={onAnalyze} />
       </div>
@@ -320,6 +288,80 @@ export default function PGNInput({
           <span className="text-[10px] font-semibold text-gray-400 dark:text-slate-500 mt-1">
             Drag & Drop to browse
           </span>
+        </div>
+      </div>
+
+      {/* Play v/s GM Botvinnik Card */}
+      <div className="mt-3 shrink-0 w-full border border-amber-300/80 dark:border-amber-700/60 bg-gradient-to-br from-amber-50 via-orange-50/70 to-amber-100/50 dark:from-slate-800 dark:via-amber-950/25 dark:to-slate-800 rounded-xl p-3 sm:p-3.5 shadow-sm transition-all">
+        {/* Header / Action Row */}
+        <div
+          onClick={handleOpenBotvinnik}
+          className="flex items-center justify-between cursor-pointer group"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-xl overflow-hidden border border-amber-300 dark:border-amber-700/60 shadow-xs group-hover:scale-105 transition-transform shrink-0 bg-amber-100 dark:bg-amber-900/40">
+              <img
+                src="/botvinnik.jpg"
+                alt="GM Mikhail Botvinnik"
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  e.target.src = '/botvinnik/botvinnik.jpg';
+                }}
+              />
+            </div>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs sm:text-sm font-black text-gray-900 dark:text-slate-100 leading-tight">
+                  Play v/s GM Botvinnik
+                </span>
+                <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500 text-white shadow-xs">
+                  NEW
+                </span>
+              </div>
+              <span className="text-[10px] sm:text-[11px] font-medium text-gray-600 dark:text-slate-400 mt-0.5">
+                Trained on 919 GM games · Stockfish Depth 7 Live Analysis
+              </span>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleOpenBotvinnik();
+            }}
+            className="flex items-center gap-1 text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 active:scale-95 transition-all px-3 py-1.5 rounded-lg shadow-xs shrink-0 ml-2 group-hover:translate-x-0.5"
+          >
+            <span>Play</span>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        </div>
+
+        {/* White Box for Text */}
+        <div className="mt-3 bg-white dark:bg-slate-900/90 border border-amber-200/90 dark:border-slate-700/80 rounded-xl p-3 sm:p-3.5 shadow-xs text-xs sm:text-[12.5px] leading-relaxed text-gray-700 dark:text-slate-300 space-y-2.5">
+          <p>
+            We extend our sincere appreciation to Sarbojeet Bhowmick, an Engineer, rated chess player, and Senior Chess Coach, from Kolkata, India, for developing this Python-based chess engine, now available on our website. Inspired by the strategic depth, positional understanding, and distinctive playing style of the 6th World Chess Champion, Mikhail Botvinnik, this feature offers chess enthusiasts an opportunity to experience a challenging game against a virtual Botvinnik. Drawing upon his technical expertise and coaching experience, Sarbojeet has brought together his passion for engineering and the royal game of chess in this unique initiative.
+          </p>
+
+          <p>
+            We warmly invite everyone to try the Play vs. GM Botvinnik feature and share their thoughts, suggestions, and feedback to help us make it even better.
+          </p>
+
+          <div className="pt-2 border-t border-gray-100 dark:border-slate-800 flex flex-wrap items-center gap-1.5 text-xs sm:text-[12.5px]">
+            <span className="font-semibold text-gray-800 dark:text-slate-200">Contact Sarbojeet:</span>
+            <a
+              href="mailto:sarbojeet001@gmail.com"
+              onClick={(e) => e.stopPropagation()}
+              className="text-amber-600 dark:text-amber-400 font-bold hover:underline inline-flex items-center gap-1 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              sarbojeet001@gmail.com
+            </a>
+          </div>
         </div>
       </div>
 
